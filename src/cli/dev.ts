@@ -7,6 +7,7 @@ import { createSharedRegion, destroySharedRegion, signalToShim } from "../ipc/sh
 import { loadMenu } from "../menu"
 import { serializeMenu } from "../menu"
 import { runDoctor, printDoctorResults } from "./doctor"
+import { buildNativeExtensions } from "../native/build"
 import type { IpcMessage } from "../types"
 
 const SHM_SIZE = 128 * 1024
@@ -179,12 +180,15 @@ export const runDev = async (projectDir: string): Promise<void> => {
     await compileShim(projectDir)
   }
 
-  // 4. Bundle app assets
+  // 4. Build native extensions (if any)
+  await buildNativeExtensions(projectDir)
+
+  // 5. Bundle app assets
   console.log("Bundling app...")
   const buildDir = await bundleApp(projectDir, config.build.entry)
   const htmlPath = join(buildDir, "index.html")
 
-  // 5. Create shared memory
+  // 6. Create shared memory
   const shmName = `/butter_${process.pid}`
   const region = createSharedRegion(shmName, SHM_SIZE)
 

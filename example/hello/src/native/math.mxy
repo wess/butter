@@ -1,0 +1,27 @@
+// @butter-export
+int add(int a, int b) {
+  return a + b;
+}
+
+// @butter-export
+int factorial(int n) {
+  if (n <= 1) {
+    return 1;
+  }
+  return n * factorial(n - 1);
+}
+
+// @butter-export
+int fibonacci(int n) {
+  if (n <= 1) {
+    return n;
+  }
+  int a = 0;
+  int b = 1;
+  for i in 2..n+1 {
+    int tmp = b;
+    b = a + b;
+    a = tmp;
+  }
+  return b;
+}

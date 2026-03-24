@@ -10,6 +10,7 @@ Butter is a minimal desktop application framework for macOS and Linux. It pairs 
 | [api.md](./api.md) | Host-side and webview-side API surfaces |
 | [config.md](./config.md) | `butter.yaml` schema, all options with types and defaults |
 | [types.md](./types.md) | TypeScript types exported from the `butter` package |
+| [native.md](./native.md) | Native extensions (C/Moxy), BUTTER_EXPORT, type mapping, compilation |
 | [architecture.md](./architecture.md) | Process model, shared memory layout, ring buffer protocol, bridge injection |
 
 ## Concepts

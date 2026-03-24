@@ -31,8 +31,9 @@ Your TypeScript runs in Bun. Your UI runs in the system webview. They communicat
 1. [Getting Started](./gettingstarted.md) — Install, create a project, run it
 2. [IPC](./ipc.md) — invoke/on patterns, async handlers, error handling
 3. [Menus](./menus.md) — Native menus, shortcuts, handling custom actions
-4. [Building](./building.md) — Compile to a single binary for distribution
-5. [Plugins](./plugins.md) — Creating and using plugins
+4. [Native Extensions](./native.md) — Write C or Moxy code, auto-compiled with FFI bindings
+5. [Building](./building.md) — Compile to a single binary for distribution
+6. [Plugins](./plugins.md) — Creating and using plugins
 
 ## Project Structure
 

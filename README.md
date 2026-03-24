@@ -6,7 +6,7 @@
 
 <p align="center">A lightweight desktop app framework for building native applications with TypeScript, HTML, and CSS. Powered by <a href="https://bun.sh">Bun</a>.</p>
 
-Butter gives you a native window with a webview and a direct IPC bridge between your TypeScript backend and your frontend — no bundled browser engine, no background servers, and a single-file binary output.
+Butter gives you a native window with a webview and a direct IPC bridge between your TypeScript backend and your frontend — no bundled browser engine, no background servers, and a single-file binary output. Write native C or [Moxy](https://github.com/moxylang/moxy) extensions and call them directly from TypeScript.
 
 ## Why Butter?
 
@@ -14,12 +14,13 @@ Butter gives you a native window with a webview and a direct IPC bridge between 
 |---|----------|-------|--------|
 | Runtime | Chromium (~150MB) | System webview | System webview |
 | Backend | Node.js | Rust | Bun (TypeScript) |
+| Native extensions | N/A | Rust | C / [Moxy](https://github.com/moxylang/moxy) |
 | Binary size | ~200MB | ~5MB | ~60MB |
 | IPC | JSON over IPC pipe | JSON commands | Shared memory ring buffer |
-| Language | JS/TS | Rust + JS/TS | TypeScript only |
+| Language | JS/TS | Rust + JS/TS | TypeScript + C/Moxy |
 | Build tool | webpack/vite | Cargo | Bun |
 
-Butter's sweet spot: you want native desktop apps with TypeScript on both sides, minimal binary size, and zero configuration.
+Butter's sweet spot: you want native desktop apps with TypeScript on both sides, native performance where you need it via C/Moxy, and zero configuration.
 
 ## Installation
 
@@ -34,7 +35,7 @@ bun add -g butterframework
 **Install via curl:**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/user/butter/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/wess/butter/main/scripts/install.sh | bash
 ```
 
 **Install via Homebrew:**
@@ -79,23 +80,26 @@ butter init myapp --template react
 Butter runs two processes:
 
 ```
-┌──────────────────────────┐     ┌──────────────────────────┐
-│   Bun Process (parent)   │     │   Native Shim (child)    │
-│                          │     │                          │
-│  Your TypeScript host    │◄───►│  Native window           │
-│  code runs here          │ IPC │  WKWebView (macOS)       │
-│                          │     │  WebKitGTK (Linux)       │
-│  import { on } from      │     │                          │
-│    "butter"              │     │  Your HTML/CSS/JS        │
-│                          │     │  runs here               │
-└──────────────────────────┘     └──────────────────────────┘
++--------------------------+     +--------------------------+
+|   Bun Process (parent)   |     |   Native Shim (child)    |
+|                          |     |                          |
+|  Your TypeScript host    |<--->|  Native window           |
+|  code runs here          | IPC |  WKWebView (macOS)       |
+|                          |     |  WebKitGTK (Linux)       |
+|  import { on } from      |     |  WebView2 (Windows)      |
+|    "butter"              |     |                          |
+|                          |     |  Your HTML/CSS/JS        |
+|  C/Moxy native modules   |     |  runs here               |
+|  via FFI                 |     |                          |
++--------------------------+     +--------------------------+
          Shared Memory Ring Buffer
 ```
 
-- **No web server** — HTML is loaded from disk
+- **No web server** — assets served via `butter://` custom protocol
 - **No bundled browser** — uses the OS native webview
-- **Shared memory IPC** — fast communication between host and webview via ring buffers
-- **Single binary** — `butter compile` produces one executable with everything embedded
+- **Shared memory IPC** — fast communication via ring buffers
+- **Native extensions** — write C or Moxy, auto-compiled and bound via FFI
+- **Single binary** — `butter compile` produces one executable
 
 ## Project Structure
 
@@ -109,6 +113,8 @@ myapp/
     host/
       index.ts         # Backend TypeScript (runs in Bun)
       menu.ts          # Native menu definition (optional)
+    native/            # C/Moxy native extensions (optional)
+      math.mxy         # Compiled to shared lib, auto-bound via FFI
     env.d.ts           # Type declarations for webview globals
   butter.yaml          # Configuration
   package.json
@@ -123,10 +129,18 @@ window:
   title: My App
   width: 800
   height: 600
+  icon: assets/icon.png    # optional
 
 build:
   entry: src/app/index.html
   host: src/host/index.ts
+
+bundle:
+  identifier: com.example.myapp
+  category: public.app-category.utilities
+
+plugins:
+  - butter-plugin-dialog
 ```
 
 ## API
@@ -155,6 +169,14 @@ send("status:updated", { ready: true })
 // Window control
 setWindow({ title: "New Title" })
 const { width, height } = getWindow()
+
+// Window events
+on("window:resize", (data: { width: number; height: number }) => {
+  console.log("Window resized to", data.width, data.height)
+})
+
+on("window:focus", () => console.log("Window focused"))
+on("window:blur", () => console.log("Window blurred"))
 ```
 
 ### Webview Side (Browser)
@@ -164,15 +186,81 @@ Your frontend code in `src/app/main.ts`:
 ```ts
 // Call host handlers
 const greeting = await butter.invoke("greet", "World")
-console.log(greeting) // "Hello, World!"
+
+// With timeout (rejects if no response within 5 seconds)
+const data = await butter.invoke("fetch:data", url, { timeout: 5000 })
+
+// Stream large results with progress
+await butter.stream("process:file", filePath, (chunk) => {
+  console.log("Progress:", chunk)
+})
 
 // Listen for events from the host
 butter.on("status:updated", (data) => {
-  console.log(data.ready) // true
+  console.log(data.ready)
 })
+
+// Stop listening
+butter.off("status:updated", handler)
+
+// Native context menu
+const action = await butter.contextMenu([
+  { label: "Copy", action: "copy" },
+  { separator: true },
+  { label: "Delete", action: "delete" },
+])
 ```
 
-The `butter` global is automatically injected into the webview — no imports needed. TypeScript types are provided via `src/env.d.ts`.
+The `butter` global is automatically injected into the webview. TypeScript types are provided via `src/env.d.ts`.
+
+### Native Extensions (C / Moxy)
+
+Write performance-critical code in C or [Moxy](https://github.com/moxylang/moxy) and call it directly from TypeScript. Butter auto-compiles and generates FFI bindings.
+
+**Moxy** (`src/native/math.mxy`):
+
+```moxy
+// @butter-export
+int fibonacci(int n) {
+  if (n <= 1) { return n; }
+  int a = 0;
+  int b = 1;
+  for i in 2..n+1 {
+    int tmp = b;
+    b = a + b;
+    a = tmp;
+  }
+  return b;
+}
+```
+
+**C** (`src/native/crypto.c`):
+
+```c
+#include "butter.h"
+
+BUTTER_EXPORT(
+  int fast_hash(const char *input, int len) {
+    int hash = 0;
+    for (int i = 0; i < len; i++) hash = hash * 31 + input[i];
+    return hash;
+  }
+)
+```
+
+**Use from TypeScript:**
+
+```ts
+import { native } from "butter/native"
+
+const math = await native("math")
+const fib = math.fibonacci(20)  // 6765 — computed in native code
+
+const crypto = await native("crypto")
+const hash = crypto.fast_hash("hello", 5)
+```
+
+Butter parses `BUTTER_EXPORT()` blocks (C) or `// @butter-export` annotations (Moxy), extracts function signatures, compiles to a shared library, and generates typed TypeScript bindings. Recompiles only when source changes.
 
 ### Menus
 
@@ -206,38 +294,73 @@ export default [
 ```
 
 - `CmdOrCtrl` resolves to Cmd on macOS, Ctrl on Linux/Windows
-- Standard edit actions (undo, redo, cut, copy, paste) map to native OS behavior
-- Custom actions fire as IPC events — handle them with `on("file:new", ...)`
-- On macOS, the app menu (About, Hide, Quit) is built automatically from your app title
+- Standard edit actions map to native OS behavior
+- Custom actions fire as IPC events — handle with `on("file:new", ...)`
+- On macOS, the app menu is built automatically from your app title
+
+### Typed IPC
+
+For type-safe IPC between host and webview:
+
+```ts
+// shared/types.ts — define your IPC contract
+import type { InvokeMap } from "butter"
+
+export type AppInvokes = {
+  greet: { input: string; output: string }
+  "math:add": { input: { a: number; b: number }; output: number }
+}
+```
+
+```ts
+// host side
+import { createTypedHandlers } from "butter/types"
+const { on } = createTypedHandlers<AppInvokes>()
+on("greet", (name) => `Hello, ${name}!`)  // fully typed
+```
+
+```ts
+// webview side
+import { createTypedInvoke } from "butter/types"
+const { invoke } = createTypedInvoke<AppInvokes>()
+const greeting = await invoke("greet", "World")  // typed as string
+```
 
 ## CLI
 
 ```
-butter init <name>    Create a new project
-butter dev            Start development mode (with hot reload)
-butter compile        Build a single-file binary
-butter doctor         Check platform prerequisites
+butter init <name> [--template vanilla|react|svelte|vue]
+                     Create a new project
+butter dev           Start development mode (hot reload + DevTools)
+butter compile       Build a single-file binary
+butter bundle        Create OS-native app package (.app / AppDir)
+butter doctor        Check platform prerequisites
 ```
 
 ### `butter dev`
 
 Starts development mode:
-1. Compiles the native shim (cached after first run)
-2. Bundles your frontend assets
-3. Opens a native window
-4. Watches for file changes and reloads automatically
+1. Compiles native extensions (C/Moxy) if present
+2. Compiles the native shim (cached)
+3. Bundles frontend assets
+4. Opens a native window with DevTools enabled (right-click to inspect)
+5. Watches for file changes and reloads automatically
 
 ### `butter compile`
 
 Produces a single executable:
-1. Bundles frontend assets and inlines them
-2. Embeds the native shim binary
-3. Compiles everything with `bun build --compile`
-4. Output: `dist/<appname>` (~60MB, mostly the Bun runtime)
+1. Compiles native extensions and shim
+2. Bundles and embeds all assets
+3. Strips debug symbols
+4. Output: `dist/<appname>` (~60MB)
+
+### `butter bundle`
+
+Creates an OS-native app package:
+- **macOS**: `.app` bundle with `Info.plist`, icon, and the compiled binary
+- **Linux**: AppDir structure with `.desktop` file and `AppRun` symlink
 
 ### `butter doctor`
-
-Checks that your system has the required prerequisites:
 
 ```
 $ butter doctor
@@ -249,21 +372,42 @@ $ butter doctor
   All checks passed.
 ```
 
+## Plugins
+
+Built-in plugins for common native capabilities:
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `dialog` | Native open/save file dialogs |
+| `notifications` | OS notification center |
+| `clipboard` | Read/write system clipboard |
+| `tray` | System tray icon with menu |
+| `globalshortcuts` | Hotkeys that work when app is unfocused |
+| `autoupdater` | Check for updates, download new versions |
+
+```ts
+import { on } from "butter"
+
+// File dialogs (via osascript on macOS)
+on("open-file", async () => {
+  const path = await butter.invoke("dialog:open", { prompt: "Select a file" })
+  return path
+})
+```
+
 ## Platform Support
 
 | Platform | Webview | Compiler | Status |
 |----------|---------|----------|--------|
 | macOS | WKWebView | clang (Xcode CLI tools) | Supported |
-| Linux | WebKitGTK | cc/gcc | Written, untested |
-| Windows | WebView2 | — | Planned |
+| Linux | WebKitGTK | cc/gcc | Written |
+| Windows | WebView2 | MSVC/MinGW | Written |
 
 ### macOS
 
 No additional dependencies — WKWebView and clang ship with macOS.
 
 ### Linux
-
-Requires WebKitGTK and GTK3:
 
 ```bash
 # Ubuntu/Debian
@@ -278,66 +422,35 @@ sudo pacman -S webkit2gtk-4.1 gtk3
 
 ## Architecture
 
-Butter has three layers:
-
 ```
 App Code (TS/HTML/CSS)          You write this
-Butter Runtime (Bun/TS)         CLI, IPC bridge, API
-Platform Shim (C/ObjC)          Native window + webview
+Native Extensions (C/Moxy)      Optional, auto-compiled
+Butter Runtime (Bun/TS)         CLI, IPC bridge, API, FFI bindings
+Platform Shim (ObjC/C)          Native window + webview
 ```
 
 ### IPC
 
-Communication uses shared memory with two ring buffers (one per direction). Messages are length-prefixed JSON. Synchronization uses POSIX named semaphores.
+Shared memory with two ring buffers. Messages are length-prefixed JSON. Signaling via POSIX named semaphores.
 
 ```
-┌──────────┬──────────────────┬──────────────────┐
-│ Header   │ Host → Webview   │ Webview → Host   │
-│ (64B)    │ ring buffer      │ ring buffer      │
-└──────────┴──────────────────┴──────────────────┘
++----------+------------------+------------------+
+| Header   | Host -> Webview  | Webview -> Host  |
+| (64B)    | ring buffer      | ring buffer      |
++----------+------------------+------------------+
              128KB total shared memory
 ```
 
-The webview communicates through the native shim's message handler (WKScriptMessageHandler on macOS, WebKitGTK script message handler on Linux). The shim relays messages to/from the shared memory ring buffer.
-
-### Plugin System
-
-Butter has an extensible plugin system for adding native capabilities:
-
-```ts
-import type { Plugin } from "butter"
-
-const dialog: Plugin = {
-  name: "dialog",
-  host: ({ on }) => {
-    on("dialog:open", (opts) => openNativeDialog(opts))
-  },
-  webview: () => `
-    window.butter.dialog = {
-      open: (opts) => butter.invoke("dialog:open", opts)
-    }
-  `,
-}
-
-export default dialog
-```
-
-Register plugins in `butter.yaml`:
-
-```yaml
-plugins:
-  - butter-plugin-dialog
-```
+Assets are served via the `butter://` custom protocol, eliminating `file://` CORS restrictions.
 
 ## Development
 
 ```bash
-# Clone the repo
 git clone https://github.com/wess/butter.git
 cd butter
 bun install
 
-# Run the example
+# Run the example (includes native Moxy extension)
 cd example/hello
 bun install
 bun run dev
