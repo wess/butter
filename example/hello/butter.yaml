@@ -1,0 +1,8 @@
+window:
+  title: "hello"
+  width: 800
+  height: 600
+
+build:
+  entry: src/app/index.html
+  host: src/host/index.ts

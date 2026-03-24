@@ -1,0 +1,19 @@
+{
+  "name": "butter",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "butter": "./src/cli/index.ts"
+  },
+  "exports": {
+    ".": "./src/runtime/index.ts",
+    "./types": "./src/types/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
