@@ -3,12 +3,15 @@
   "module": "src/host/index.ts",
   "type": "module",
   "private": true,
+  "dependencies": {
+    "butter": "npm:butterframework@latest"
+  },
   "devDependencies": {
-    "@types/bun": "latest",
-    "butter": "latest"
+    "@types/bun": "latest"
   },
   "scripts": {
     "dev": "butter dev",
-    "build": "butter compile"
+    "build": "butter compile",
+    "bundle": "butter bundle"
   }
 }

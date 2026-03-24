@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - name: Run tests
+        run: bun test
+
+      - name: Verify shim compiles
+        run: clang -o /tmp/shimtest src/shim/darwin.m -framework Cocoa -framework WebKit -fobjc-arc && rm /tmp/shimtest
+
+      - name: Verify CLI runs
+        run: bun src/cli/index.ts doctor

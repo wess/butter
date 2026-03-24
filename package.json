@@ -1,19 +1,43 @@
 {
-  "name": "butter",
-  "version": "0.1.0",
+  "name": "butterframework",
+  "version": "0.0.1",
   "type": "module",
-  "private": true,
+  "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
+  "license": "MIT",
   "bin": {
     "butter": "./src/cli/index.ts"
   },
   "exports": {
     ".": "./src/runtime/index.ts",
-    "./types": "./src/types/index.ts"
+    "./types": "./src/types/index.ts",
+    "./plugins": "./src/plugins/index.ts"
+  },
+  "files": [
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "keywords": [
+    "desktop",
+    "webview",
+    "electron-alternative",
+    "bun",
+    "typescript",
+    "native",
+    "gui",
+    "framework"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wess/butter"
   },
   "devDependencies": {
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "engines": {
+    "bun": ">=1.2.0"
   }
 }

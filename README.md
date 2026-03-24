@@ -21,22 +21,57 @@ Butter gives you a native window with a webview and a direct IPC bridge between 
 
 Butter's sweet spot: you want native desktop apps with TypeScript on both sides, minimal binary size, and zero configuration.
 
+## Installation
+
+Requires [Bun](https://bun.sh) v1.2+.
+
+**Install via Bun (recommended):**
+
+```bash
+bun add -g butterframework
+```
+
+**Install via curl:**
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/user/butter/main/scripts/install.sh | bash
+```
+
+**Install via Homebrew:**
+
+```bash
+brew tap wess/packages
+brew install butter
+```
+
+Verify installation:
+
+```bash
+butter doctor
+```
+
 ## Quick Start
 
 ```bash
-# Install Bun if you haven't
-curl -fsSL https://bun.sh/install | bash
-
 # Create a new project
-bunx butter init myapp
+butter init myapp
 cd myapp
 bun install
 
-# Start development
+# Start development (opens a native window)
 bun run dev
 
 # Build a single binary
 bun run build
+
+# Create an .app bundle (macOS)
+butter bundle
+```
+
+Templates available: `vanilla` (default), `react`, `svelte`, `vue`
+
+```bash
+butter init myapp --template react
 ```
 
 ## How It Works
@@ -298,7 +333,7 @@ plugins:
 
 ```bash
 # Clone the repo
-git clone https://github.com/user/butter.git
+git clone https://github.com/wess/butter.git
 cd butter
 bun install
 

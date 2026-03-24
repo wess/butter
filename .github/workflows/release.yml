@@ -1,0 +1,138 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "package.json"
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      changed: ${{ steps.diff.outputs.changed }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Check if version changed
+        id: diff
+        run: |
+          OLD=$(git show HEAD~1:package.json | jq -r '.version' 2>/dev/null || echo "")
+          NEW=$(jq -r '.version' package.json)
+          if [ "$OLD" != "$NEW" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Get version
+        id: version
+        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
+
+  publish:
+    runs-on: ubuntu-latest
+    needs: check-version
+    if: needs.check-version.outputs.changed == 'true'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+      - run: bun test
+
+      - name: Publish to npm
+        run: bun publish --access public
+        env:
+          BUN_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Create git tag
+        run: |
+          git tag "v${{ needs.check-version.outputs.version }}"
+          git push origin "v${{ needs.check-version.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ needs.check-version.outputs.version }}"
+          generate_release_notes: true
+          draft: false
+
+  update-homebrew:
+    runs-on: ubuntu-latest
+    needs: [check-version, publish]
+    if: needs.check-version.outputs.changed == 'true'
+    steps:
+      - name: Wait for release tarball
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          URL="https://github.com/wess/butter/archive/refs/tags/v${VERSION}.tar.gz"
+          for i in $(seq 1 30); do
+            if curl -fsSL -o /tmp/butter.tar.gz "$URL" 2>/dev/null; then
+              echo "Tarball available"
+              break
+            fi
+            echo "Waiting for tarball... ($i/30)"
+            sleep 10
+          done
+
+      - name: Compute SHA256
+        id: sha
+        run: echo "sha256=$(sha256sum /tmp/butter.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: wess/homebrew-packages
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          SHA="${{ steps.sha.outputs.sha256 }}"
+          cat > tap/Formula/butter.rb << RUBY
+          class Butter < Formula
+            desc "Lightweight desktop app framework with native webview and TypeScript"
+            homepage "https://github.com/wess/butter"
+            url "https://github.com/wess/butter/archive/refs/tags/v${VERSION}.tar.gz"
+            sha256 "${SHA}"
+            license "MIT"
+
+            depends_on "bun"
+
+            def install
+              system "bun", "add", "-g", "butterframework@#{version}"
+            end
+
+            def caveats
+              <<~EOS
+                Butter requires Bun to be installed.
+
+                Get started:
+                  butter init myapp
+                  cd myapp
+                  bun install
+                  bun run dev
+              EOS
+            end
+
+            test do
+              assert_match "butter", shell_output("#{bin}/butter help")
+            end
+          end
+          RUBY
+
+      - name: Push updated formula
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/butter.rb
+          git commit -m "Update butter to v${{ needs.check-version.outputs.version }}"
+          git push
