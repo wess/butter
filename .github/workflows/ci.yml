@@ -16,7 +16,9 @@ jobs:
       - run: bun install
 
       - name: Run tests
-        run: bun test
+        run: |
+          bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts
+          bun test tests/shmem.test.ts
 
       - name: Verify shim compiles
         run: clang -o /tmp/shimtest src/shim/darwin.m -framework Cocoa -framework WebKit -fobjc-arc && rm /tmp/shimtest

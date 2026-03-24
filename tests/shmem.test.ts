@@ -1,5 +1,11 @@
 import { test, expect, afterEach, describe } from "bun:test"
-import {
+
+// shmem tests use macOS-specific FFI — skip on other platforms
+if (process.platform !== "darwin") {
+  test.skip("shmem tests require macOS", () => {})
+} else {
+
+const {
   createSharedRegion,
   openSharedRegion,
   signalToBun,
@@ -7,7 +13,7 @@ import {
   waitForBunSignal,
   tryWaitForShimSignal,
   destroySharedRegion,
-} from "../src/ipc/shmem"
+} = await import("../src/ipc/shmem")
 
 // macOS sem names limited to 30 chars (31 including null).
 // sem names become: /btXXXXX.tb (11 chars) and /btXXXXX.ts (11 chars)
@@ -99,3 +105,5 @@ describe("shared memory", () => {
     expect(() => openSharedRegion(name, 4096)).toThrow()
   })
 })
+
+} // end platform guard

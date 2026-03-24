@@ -1,7 +1,7 @@
 import { test, expect } from "bun:test"
 import { shimSourcePath, shimBinaryPath, needsRecompile } from "../src/shim"
 
-test("shimSourcePath returns darwin.c on macOS", () => {
+test("shimSourcePath returns darwin.m on macOS", () => {
   const path = shimSourcePath()
   expect(path).toContain("darwin.m")
 })

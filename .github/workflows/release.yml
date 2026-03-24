@@ -36,7 +36,7 @@ jobs:
         run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
 
   publish:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     steps:
@@ -44,7 +44,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install
-      - run: bun test
+      - name: Run tests
+        run: |
+          bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts
+          bun test tests/shmem.test.ts
 
       - name: Publish to npm
         run: bun publish --access public
