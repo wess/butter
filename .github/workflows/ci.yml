@@ -21,7 +21,7 @@ jobs:
           bun test tests/shmem.test.ts
 
       - name: Verify shim compiles
-        run: clang -o /tmp/shimtest src/shim/darwin.m -framework Cocoa -framework WebKit -fobjc-arc && rm /tmp/shimtest
+        run: clang -o /tmp/shimtest src/shim/darwin.m -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -fobjc-arc && rm /tmp/shimtest
 
       - name: Verify CLI runs
         run: bun src/cli/index.ts doctor
