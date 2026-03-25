@@ -18,7 +18,20 @@ export const needsRecompile = async (
   if (!(await binary.exists())) return true
 
   const source = Bun.file(sourcePath)
-  return source.lastModified > binary.lastModified
+  if (source.lastModified > binary.lastModified) return true
+
+  // Also recompile if the Butter package version changed
+  try {
+    const versionFile = join(binaryPath + ".version")
+    const vf = Bun.file(versionFile)
+    const pkg = await import("../../package.json")
+    const currentVersion = pkg.default?.version ?? pkg.version ?? ""
+    if (!(await vf.exists())) return true
+    const cachedVersion = await vf.text()
+    return cachedVersion.trim() !== currentVersion
+  } catch {
+    return true
+  }
 }
 
 export const compileShim = async (projectDir: string): Promise<string> => {
@@ -35,6 +48,13 @@ export const compileShim = async (projectDir: string): Promise<string> => {
     const libs = await $`pkg-config --libs gtk+-3.0 webkit2gtk-4.1`.text()
     await $`tcc -o ${output} ${source} ${cflags.trim().split(" ")} ${libs.trim().split(" ")}`
   }
+
+  // Stamp version so we know when to recompile after package updates
+  try {
+    const pkg = await import("../../package.json")
+    const version = pkg.default?.version ?? pkg.version ?? ""
+    await Bun.write(output + ".version", version)
+  } catch { /* non-critical */ }
 
   return output
 }
