@@ -287,27 +287,106 @@ static NSString *g_assetDir = nil;
     NSString *defaultPath = opts[@"defaultPath"];
     if (defaultPath) [panel setDirectoryURL:[NSURL fileURLWithPath:defaultPath]];
 
+    /* Build filters and optional format popup */
     NSArray *fileTypes = opts[@"filters"];
-    if (fileTypes && [fileTypes isKindOfClass:[NSArray class]] && fileTypes.count > 0) {
-        NSMutableArray *utTypes = [NSMutableArray array];
+    __block NSPopUpButton *formatPopup = nil;
+    NSMutableArray *filterExtArrays = [NSMutableArray array]; /* parallel array of extension arrays */
+
+    if (fileTypes && [fileTypes isKindOfClass:[NSArray class]] && fileTypes.count > 1) {
+        /* Multiple filters — show a "File Format:" popup as accessory view */
+        NSView *accessory = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 32)];
+
+        NSTextField *label = [NSTextField labelWithString:@"Format:"];
+        [label setFont:[NSFont systemFontOfSize:12]];
+        [label setFrame:NSMakeRect(0, 6, 60, 20)];
+        [accessory addSubview:label];
+
+        formatPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(64, 2, 220, 28) pullsDown:NO];
+        [formatPopup setFont:[NSFont systemFontOfSize:12]];
+
         for (NSDictionary *filter in fileTypes) {
-            NSArray *exts = filter[@"extensions"];
-            if (!exts) continue;
-            for (NSString *ext in exts) {
+            NSString *name = filter[@"name"] ?: @"File";
+            NSArray *exts = filter[@"extensions"] ?: @[];
+            NSString *extLabel = [exts componentsJoinedByString:@", "];
+            [formatPopup addItemWithTitle:[NSString stringWithFormat:@"%@ (.%@)", name, extLabel]];
+            [filterExtArrays addObject:exts];
+        }
+
+        /* When selection changes, update allowed types and filename extension */
+        formatPopup.target = self;
+        /* We'll handle selection change via the panel running modally — set initial type */
+
+        [accessory addSubview:formatPopup];
+        [panel setAccessoryView:accessory];
+
+        /* Set initial allowed content types from first filter */
+        NSArray *firstExts = filterExtArrays.firstObject;
+        if (firstExts) {
+            NSMutableArray *utTypes = [NSMutableArray array];
+            for (NSString *ext in firstExts) {
                 UTType *t = [UTType typeWithFilenameExtension:ext];
                 if (t) [utTypes addObject:t];
             }
+            if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
         }
-        if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
+
+
+        /* Use a timer to poll popup selection changes while panel is open */
+        __block NSInteger lastIndex = 0;
+        NSTimer *pollTimer = [NSTimer timerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *t) {
+            if (!formatPopup) { [t invalidate]; return; }
+            NSInteger idx = [formatPopup indexOfSelectedItem];
+            if (idx != lastIndex && idx >= 0 && idx < (NSInteger)filterExtArrays.count) {
+                lastIndex = idx;
+                NSArray *exts = filterExtArrays[idx];
+                NSMutableArray *utTypes = [NSMutableArray array];
+                for (NSString *ext in exts) {
+                    UTType *ut = [UTType typeWithFilenameExtension:ext];
+                    if (ut) [utTypes addObject:ut];
+                }
+                if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
+
+                /* Update the filename extension to match */
+                NSString *currentName = [panel nameFieldStringValue];
+                NSString *baseName = [currentName stringByDeletingPathExtension];
+                NSString *newExt = exts.firstObject ?: @"";
+                [panel setNameFieldStringValue:[baseName stringByAppendingPathExtension:newExt]];
+            }
+        }];
+        [[NSRunLoop mainRunLoop] addTimer:pollTimer forMode:NSModalPanelRunLoopMode];
+
+        NSModalResponse result = [panel runModal];
+        [pollTimer invalidate];
+
+        NSString *path = result == NSModalResponseOK ? [[panel URL] path] : @"";
+        NSString *response = [NSString stringWithFormat:
+            @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:save\",\"data\":{\"path\":\"%@\",\"cancelled\":%@}}",
+            msgId, path ?: @"", result == NSModalResponseOK ? @"false" : @"true"];
+        [self injectDialogResponse:response];
+
+    } else {
+        /* Single or no filter — simple save panel */
+        if (fileTypes && [fileTypes isKindOfClass:[NSArray class]] && fileTypes.count == 1) {
+            NSDictionary *filter = fileTypes.firstObject;
+            NSArray *exts = filter[@"extensions"];
+            if (exts) {
+                NSMutableArray *utTypes = [NSMutableArray array];
+                for (NSString *ext in exts) {
+                    UTType *t = [UTType typeWithFilenameExtension:ext];
+                    if (t) [utTypes addObject:t];
+                }
+                if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
+            }
+        }
+
+        NSModalResponse result = [panel runModal];
+        NSString *path = result == NSModalResponseOK ? [[panel URL] path] : @"";
+
+        NSString *response = [NSString stringWithFormat:
+            @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:save\",\"data\":{\"path\":\"%@\",\"cancelled\":%@}}",
+            msgId, path ?: @"", result == NSModalResponseOK ? @"false" : @"true"];
+        [self injectDialogResponse:response];
     }
-
-    NSModalResponse result = [panel runModal];
-    NSString *path = result == NSModalResponseOK ? [[panel URL] path] : @"";
-
-    NSString *response = [NSString stringWithFormat:
-        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:save\",\"data\":{\"path\":\"%@\",\"cancelled\":%@}}",
-        msgId, path ?: @"", result == NSModalResponseOK ? @"false" : @"true"];
-    [self injectDialogResponse:response];
 }
 
 - (void)showFolderDialogForWebview:(NSDictionary *)opts messageId:(NSString *)msgId {

@@ -1,21 +1,28 @@
 /*
  * System dialogs API for Butter apps.
  *
- * Dialogs run on the shim's main thread (required by macOS/GTK).
- * The host sends a control message, the shim opens the native panel,
- * and sends the result back as a response.
+ * Works on both host and webview sides:
+ * - Host: sends a control message through the runtime
+ * - Webview: calls butter.invoke() which the shim intercepts natively
  *
- * Usage:
+ * Usage (webview — React, vanilla JS, etc.):
  *   import { dialog } from "butter/dialog"
  *
- *   const result = await dialog.open({
- *     title: "Select a file",
- *     filters: [{ name: "Images", extensions: ["png", "jpg"] }],
+ *   const result = await dialog.save({
+ *     defaultName: "export.csv",
+ *     filters: [
+ *       { name: "CSV", extensions: ["csv"] },
+ *       { name: "JSON", extensions: ["json"] },
+ *     ],
  *   })
  *
  *   if (!result.cancelled) {
- *     console.log(result.paths)
+ *     console.log(result.path)
  *   }
+ *
+ * Usage (host):
+ *   import { dialog } from "butter/dialog"
+ *   // Same API — automatically detects host vs webview context
  */
 
 export type FileFilter = {
@@ -61,18 +68,90 @@ export type FolderDialogResult = {
   cancelled: boolean
 }
 
-const getRuntime = () => {
+const isWebview = (): boolean =>
+  typeof globalThis.__butterRuntime === "undefined" &&
+  typeof (globalThis as any).butter?.invoke === "function"
+
+const isHost = (): boolean =>
+  typeof globalThis.__butterRuntime !== "undefined"
+
+const invokeFromWebview = (action: string, data: unknown): Promise<unknown> =>
+  (globalThis as any).butter.invoke(action, data)
+
+const invokeFromHost = (action: string, data: unknown): Promise<unknown> => {
   if (!globalThis.__butterRuntime) throw new Error("Butter runtime not initialized")
-  return globalThis.__butterRuntime
+  return (globalThis.__butterRuntime as any).control(action, data)
 }
 
+const invoke = (action: string, data: unknown): Promise<unknown> => {
+  if (isWebview()) return invokeFromWebview(action, data)
+  if (isHost()) return invokeFromHost(action, data)
+  throw new Error("butter/dialog: not running in a Butter context (no runtime or webview bridge found)")
+}
+
+const normalizeBool = (v: unknown): boolean =>
+  v === true || v === "true"
+
 export const dialog = {
-  open: (opts: OpenDialogOptions = {}): Promise<OpenDialogResult> =>
-    getRuntime().control("dialog:open", opts) as Promise<OpenDialogResult>,
+  /**
+   * Show an open file dialog.
+   *
+   * @example
+   * const result = await dialog.open({
+   *   title: "Select a file",
+   *   filters: [{ name: "Images", extensions: ["png", "jpg", "gif"] }],
+   *   multiple: true,
+   * })
+   * if (!result.cancelled) {
+   *   for (const path of result.paths) { ... }
+   * }
+   */
+  open: async (opts: OpenDialogOptions = {}): Promise<OpenDialogResult> => {
+    const raw = await invoke("dialog:open", opts) as any
+    return {
+      paths: Array.isArray(raw?.paths) ? raw.paths : [],
+      cancelled: normalizeBool(raw?.cancelled) || !(raw?.paths?.length),
+    }
+  },
 
-  save: (opts: SaveDialogOptions = {}): Promise<SaveDialogResult> =>
-    getRuntime().control("dialog:save", opts) as Promise<SaveDialogResult>,
+  /**
+   * Show a save file dialog.
+   *
+   * @example
+   * const result = await dialog.save({
+   *   defaultName: "data.csv",
+   *   filters: [
+   *     { name: "CSV", extensions: ["csv"] },
+   *     { name: "JSON", extensions: ["json"] },
+   *   ],
+   * })
+   * if (!result.cancelled) {
+   *   console.log("Save to:", result.path)
+   * }
+   */
+  save: async (opts: SaveDialogOptions = {}): Promise<SaveDialogResult> => {
+    const raw = await invoke("dialog:save", opts) as any
+    const path = raw?.path || ""
+    return {
+      path,
+      cancelled: normalizeBool(raw?.cancelled) || !path,
+    }
+  },
 
-  folder: (opts: FolderDialogOptions = {}): Promise<FolderDialogResult> =>
-    getRuntime().control("dialog:folder", opts) as Promise<FolderDialogResult>,
+  /**
+   * Show a folder selection dialog.
+   *
+   * @example
+   * const result = await dialog.folder({ prompt: "Choose output directory" })
+   * if (!result.cancelled) {
+   *   console.log("Selected:", result.paths[0])
+   * }
+   */
+  folder: async (opts: FolderDialogOptions = {}): Promise<FolderDialogResult> => {
+    const raw = await invoke("dialog:folder", opts) as any
+    return {
+      paths: Array.isArray(raw?.paths) ? raw.paths : [],
+      cancelled: normalizeBool(raw?.cancelled) || !(raw?.paths?.length),
+    }
+  },
 }
