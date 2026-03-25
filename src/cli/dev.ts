@@ -256,6 +256,9 @@ export const runDev = async (projectDir: string): Promise<void> => {
         } catch (err) {
           sendResponse(undefined, err instanceof Error ? err.message : String(err))
         }
+      } else if (msg.type === "response" && msg.action?.startsWith("dialog:")) {
+        // Dialog responses from the shim — resolve the pending control promise
+        runtime.resolveControl(msg.id, msg.data)
       } else if (msg.type === "event") {
         // Menu actions and other events from the shim — dispatch to host handlers
         runtime.dispatch(msg.action, msg.data)

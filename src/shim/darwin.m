@@ -10,6 +10,7 @@
 
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #include <sys/mman.h>
 #include <semaphore.h>
 
@@ -231,6 +232,155 @@ static NSString *g_assetDir = nil;
     ring_write_tb(utf8, strlen(utf8));
 }
 
+/* ---------- native dialogs ---------- */
+
+- (void)handleDialogControl:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSString *msgId = msg[@"id"] ?: @"0";
+    NSString *action = msg[@"action"];
+    NSDictionary *opts = msg[@"data"] ?: @{};
+
+    if ([action isEqualToString:@"dialog:open"]) {
+        [self showOpenDialog:opts messageId:msgId];
+    } else if ([action isEqualToString:@"dialog:save"]) {
+        [self showSaveDialog:opts messageId:msgId];
+    } else if ([action isEqualToString:@"dialog:folder"]) {
+        [self showFolderDialog:opts messageId:msgId];
+    }
+}
+
+- (void)showOpenDialog:(NSDictionary *)opts messageId:(NSString *)msgId {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    [panel setCanChooseFiles:YES];
+    [panel setCanChooseDirectories:NO];
+
+    NSString *title = opts[@"title"];
+    if (title) [panel setTitle:title];
+
+    NSString *prompt = opts[@"prompt"];
+    if (prompt) [panel setPrompt:prompt];
+
+    NSNumber *multiple = opts[@"multiple"];
+    if (multiple) [panel setAllowsMultipleSelection:[multiple boolValue]];
+
+    NSArray *fileTypes = opts[@"filters"];
+    if (fileTypes && [fileTypes isKindOfClass:[NSArray class]] && fileTypes.count > 0) {
+        NSMutableArray *extensions = [NSMutableArray array];
+        for (NSDictionary *filter in fileTypes) {
+            NSArray *exts = filter[@"extensions"];
+            if (exts) [extensions addObjectsFromArray:exts];
+        }
+        if (extensions.count > 0) {
+            UTType *types[extensions.count];
+            NSMutableArray *utTypes = [NSMutableArray array];
+            for (NSString *ext in extensions) {
+                UTType *t = [UTType typeWithFilenameExtension:ext];
+                if (t) [utTypes addObject:t];
+            }
+            if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
+        }
+    }
+
+    NSString *defaultPath = opts[@"defaultPath"];
+    if (defaultPath) {
+        [panel setDirectoryURL:[NSURL fileURLWithPath:defaultPath]];
+    }
+
+    NSModalResponse result = [panel runModal];
+    NSMutableArray *paths = [NSMutableArray array];
+
+    if (result == NSModalResponseOK) {
+        for (NSURL *url in [panel URLs]) {
+            [paths addObject:[url path]];
+        }
+    }
+
+    NSData *pathsData = [NSJSONSerialization dataWithJSONObject:paths options:0 error:nil];
+    NSString *pathsJson = [[NSString alloc] initWithData:pathsData encoding:NSUTF8StringEncoding];
+
+    NSString *response = [NSString stringWithFormat:
+        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:open\",\"data\":{\"paths\":%@,\"cancelled\":%@}}",
+        msgId, pathsJson, result == NSModalResponseOK ? @"false" : @"true"];
+    ring_write_tb([response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+}
+
+- (void)showSaveDialog:(NSDictionary *)opts messageId:(NSString *)msgId {
+    NSSavePanel *panel = [NSSavePanel savePanel];
+
+    NSString *title = opts[@"title"];
+    if (title) [panel setTitle:title];
+
+    NSString *prompt = opts[@"prompt"];
+    if (prompt) [panel setPrompt:prompt];
+
+    NSString *defaultName = opts[@"defaultName"];
+    if (defaultName) [panel setNameFieldStringValue:defaultName];
+
+    NSString *defaultPath = opts[@"defaultPath"];
+    if (defaultPath) [panel setDirectoryURL:[NSURL fileURLWithPath:defaultPath]];
+
+    NSArray *fileTypes = opts[@"filters"];
+    if (fileTypes && [fileTypes isKindOfClass:[NSArray class]] && fileTypes.count > 0) {
+        NSMutableArray *utTypes = [NSMutableArray array];
+        for (NSDictionary *filter in fileTypes) {
+            NSArray *exts = filter[@"extensions"];
+            if (!exts) continue;
+            for (NSString *ext in exts) {
+                UTType *t = [UTType typeWithFilenameExtension:ext];
+                if (t) [utTypes addObject:t];
+            }
+        }
+        if (utTypes.count > 0) [panel setAllowedContentTypes:utTypes];
+    }
+
+    NSModalResponse result = [panel runModal];
+    NSString *path = result == NSModalResponseOK ? [[panel URL] path] : @"";
+
+    NSString *response = [NSString stringWithFormat:
+        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:save\",\"data\":{\"path\":\"%@\",\"cancelled\":%@}}",
+        msgId, path ?: @"", result == NSModalResponseOK ? @"false" : @"true"];
+    ring_write_tb([response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+}
+
+- (void)showFolderDialog:(NSDictionary *)opts messageId:(NSString *)msgId {
+    NSOpenPanel *panel = [NSOpenPanel openPanel];
+    [panel setCanChooseFiles:NO];
+    [panel setCanChooseDirectories:YES];
+    [panel setCanCreateDirectories:YES];
+
+    NSString *title = opts[@"title"];
+    if (title) [panel setTitle:title];
+
+    NSString *prompt = opts[@"prompt"];
+    if (prompt) [panel setPrompt:prompt];
+
+    NSNumber *multiple = opts[@"multiple"];
+    if (multiple) [panel setAllowsMultipleSelection:[multiple boolValue]];
+
+    NSString *defaultPath = opts[@"defaultPath"];
+    if (defaultPath) [panel setDirectoryURL:[NSURL fileURLWithPath:defaultPath]];
+
+    NSModalResponse result = [panel runModal];
+    NSMutableArray *paths = [NSMutableArray array];
+
+    if (result == NSModalResponseOK) {
+        for (NSURL *url in [panel URLs]) {
+            [paths addObject:[url path]];
+        }
+    }
+
+    NSData *pathsData = [NSJSONSerialization dataWithJSONObject:paths options:0 error:nil];
+    NSString *pathsJson = [[NSString alloc] initWithData:pathsData encoding:NSUTF8StringEncoding];
+
+    NSString *response = [NSString stringWithFormat:
+        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:folder\",\"data\":{\"paths\":%@,\"cancelled\":%@}}",
+        msgId, pathsJson, result == NSModalResponseOK ? @"false" : @"true"];
+    ring_write_tb([response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+}
+
 - (void)handleMenuAction:(NSMenuItem *)sender {
     NSString *action = [sender representedObject];
     if (!action) return;
@@ -301,6 +451,11 @@ static NSString *g_assetDir = nil;
             if (strstr(msg, "\"reload\"")) {
                 free(msg);
                 if (self.webview) [self.webview reload];
+                continue;
+            }
+            if (strstr(msg, "\"dialog:open\"") || strstr(msg, "\"dialog:save\"") || strstr(msg, "\"dialog:folder\"")) {
+                [self handleDialogControl:json];
+                free(msg);
                 continue;
             }
         }

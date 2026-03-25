@@ -18,6 +18,8 @@ type Runtime = {
   drainOutgoing: () => IpcMessage[]
   createWindow: (opts: CreateWindowOptions) => string
   sendChunk: (requestId: string, data: unknown) => void
+  control: (action: string, data?: unknown) => Promise<unknown>
+  resolveControl: (id: string, data: unknown) => void
 }
 
 export const createRuntime = (
@@ -84,12 +86,33 @@ export const createRuntime = (
         data: { id: requestId, type: "chunk", data },
       })
     },
+
+    control: (action, data) => {
+      const id = String(nextId++)
+      const pending = new Map<string, (data: unknown) => void>()
+      if (!globalThis.__butterPendingControls) {
+        globalThis.__butterPendingControls = new Map()
+      }
+      return new Promise<unknown>((resolve) => {
+        globalThis.__butterPendingControls.set(id, resolve)
+        outgoing.push({ id, type: "control", action, data })
+      })
+    },
+
+    resolveControl: (id, data) => {
+      const resolve = globalThis.__butterPendingControls?.get(id)
+      if (resolve) {
+        globalThis.__butterPendingControls.delete(id)
+        resolve(data)
+      }
+    },
   }
 }
 
 // Default runtime instance — set by the CLI before importing host code
 declare global {
   var __butterRuntime: Runtime | undefined
+  var __butterPendingControls: Map<string, (data: unknown) => void> | undefined
 }
 
 const getRuntime = (): Runtime => {

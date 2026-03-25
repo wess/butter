@@ -29,7 +29,7 @@ export const compileShim = async (projectDir: string): Promise<string> => {
   await $`mkdir -p ${outputDir}`
 
   if (process.platform === "darwin") {
-    await $`clang -o ${output} ${source} -framework Cocoa -framework WebKit -fobjc-arc`
+    await $`clang -o ${output} ${source} -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -fobjc-arc`
   } else if (process.platform === "linux") {
     const cflags = await $`pkg-config --cflags gtk+-3.0 webkit2gtk-4.1`.text()
     const libs = await $`pkg-config --libs gtk+-3.0 webkit2gtk-4.1`.text()

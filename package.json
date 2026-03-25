@@ -1,6 +1,6 @@
 {
   "name": "butterframework",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
   "license": "MIT",
@@ -11,7 +11,8 @@
     ".": "./src/runtime/index.ts",
     "./types": "./src/types/index.ts",
     "./plugins": "./src/plugins/index.ts",
-    "./native": "./src/native/index.ts"
+    "./native": "./src/native/index.ts",
+    "./dialog": "./src/dialog/index.ts"
   },
   "files": [
     "src",
