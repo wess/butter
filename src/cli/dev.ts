@@ -205,6 +205,12 @@ export const runDev = async (projectDir: string): Promise<void> => {
   if (config.window.icon) {
     env.BUTTER_ICON = join(projectDir, config.window.icon)
   }
+  if (config.security?.csp) {
+    env.BUTTER_CSP = config.security.csp
+  }
+  if (config.splash) {
+    env.BUTTER_SPLASH = join(projectDir, config.splash)
+  }
 
   // Load and pass menu if present
   const menu = await loadMenu(projectDir)
@@ -227,7 +233,20 @@ export const runDev = async (projectDir: string): Promise<void> => {
     console.error("Failed to load host code:", err)
   }
 
-  // 8. Poll loop
+  // 8. Build allowlist matcher
+  const allowlist = config.security?.allowlist ?? null
+  const isAllowed = (action: string): boolean => {
+    if (!allowlist) return true
+    return allowlist.some((pattern) => {
+      if (pattern === "*") return true
+      if (pattern.endsWith(":*")) {
+        return action.startsWith(pattern.slice(0, -1))
+      }
+      return action === pattern
+    })
+  }
+
+  // 9. Poll loop
   let running = true
 
   const poll = () => {
@@ -243,6 +262,13 @@ export const runDev = async (projectDir: string): Promise<void> => {
           if (error) response.error = error
           if (writeToShim(region.buffer, response)) signalToShim(region)
         }
+
+        // Enforce allowlist
+        if (!isAllowed(msg.action)) {
+          sendResponse(undefined, `Action "${msg.action}" is not allowed by security.allowlist`)
+          continue
+        }
+
         try {
           const result = runtime.dispatch(msg.action, msg.data)
           if (result instanceof Promise) {
@@ -256,8 +282,8 @@ export const runDev = async (projectDir: string): Promise<void> => {
         } catch (err) {
           sendResponse(undefined, err instanceof Error ? err.message : String(err))
         }
-      } else if (msg.type === "response" && msg.action?.startsWith("dialog:")) {
-        // Dialog responses from the shim — resolve the pending control promise
+      } else if (msg.type === "response") {
+        // Control responses from the shim (dialogs, window ops) — resolve pending promise
         runtime.resolveControl(msg.id, msg.data)
       } else if (msg.type === "event") {
         // Menu actions and other events from the shim — dispatch to host handlers

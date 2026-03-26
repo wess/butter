@@ -24,6 +24,12 @@ Scaffolds a new Butter project in a subdirectory named `<name>`.
 |---|---|---|
 | `name` | yes | Directory name for the new project. Used as the project name in generated files. |
 
+**Options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--template <name>` | `vanilla` | Project template to use. Available: `vanilla`, `react`, `svelte`, `vue`. |
+
 **Behavior**
 
 1. Resolves `<name>` relative to the current working directory.
@@ -51,6 +57,10 @@ butter init myapp
 cd myapp
 bun install
 bun run dev
+```
+
+```sh
+butter init myapp --template react
 ```
 
 ---
@@ -92,6 +102,12 @@ Produces a standalone, self-contained binary in `dist/<appname>`.
 **Arguments**
 
 None. The project directory is always `process.cwd()`.
+
+**Options**
+
+| Flag | Default | Description |
+|---|---|---|
+| `--target <platform>` | current OS | Target platform: `darwin`, `linux`, or `windows`. Cross-compilation requires the target platform's SDK; in practice this means compiling on the target OS or using a VM/container. |
 
 **Behavior**
 
@@ -166,6 +182,110 @@ butter doctor
   Webview ............ WKWebView (macOS)
 
   All checks passed.
+```
+
+---
+
+### `butter bundle`
+
+Wraps the compiled binary in a platform-native application package. You must run `butter compile` first.
+
+**Arguments**
+
+None. The project directory is always `process.cwd()`.
+
+**Behavior**
+
+The command reads `butter.yaml`, locates the compiled binary in `dist/`, and produces a native package:
+
+| Platform | Output | Contents |
+|---|---|---|
+| macOS | `dist/<App Name>.app` | `.app` bundle with `Contents/MacOS/<binary>`, `Contents/Resources/` (icon if configured), and `Contents/Info.plist` |
+| Linux | `dist/<App Name>.AppDir` | AppDir with `usr/bin/<binary>`, `AppRun` symlink, `.desktop` file, and icon if configured |
+
+The `Info.plist` (macOS) and `.desktop` file (Linux) are generated from `butter.yaml`. The bundle identifier defaults to `com.example.<appname>` and the category defaults to `public.app-category.utilities` (macOS) or `Utility` (Linux). Both can be overridden in `butter.yaml` under `bundle.identifier` and `bundle.category`.
+
+**URL scheme registration**
+
+Custom URL schemes can be registered via `bundle.urlSchemes` in `butter.yaml`:
+
+```yaml
+bundle:
+  identifier: com.mycompany.myapp
+  urlSchemes:
+    - myapp
+```
+
+On macOS this adds `CFBundleURLTypes` entries to the `Info.plist`. On Linux it adds `MimeType=x-scheme-handler/<scheme>` entries to the `.desktop` file.
+
+**Example**
+
+```sh
+butter compile
+butter bundle
+# macOS: open dist/My\ App.app
+# Linux: run appimagetool on dist/My\ App.AppDir to produce a .AppImage
+```
+
+---
+
+### `butter sign [options]`
+
+Code-signs the compiled binary or app bundle, and optionally submits it for notarization (macOS).
+
+**Arguments**
+
+None. The project directory is always `process.cwd()`.
+
+**Platform options**
+
+macOS:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--identity <id>` | `"-"` (ad-hoc) | Signing identity for `codesign`. Use your Developer ID for distribution. |
+| `--entitlements <path>` | none | Path to an entitlements plist file. |
+| `--notarize` | off | Submit the signed app to Apple's notary service and staple the ticket on success. |
+| `--apple-id <email>` | `$APPLE_ID` | Apple ID for notarization. |
+| `--team-id <id>` | `$APPLE_TEAM_ID` | Apple Developer team ID for notarization. |
+| `--password <pass>` | `$APPLE_APP_PASSWORD` | App-specific password for notarization. |
+
+Windows:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--pfx <path>` | none | Path to the `.pfx` certificate file. Required. |
+| `--pfx-password <pass>` | none | Password for the PFX certificate. |
+
+Linux:
+
+| Flag | Default | Description |
+|---|---|---|
+| `--identity <key-id>` | default GPG key | GPG key ID to sign with. Optional; uses the default GPG key if omitted. |
+
+**Behavior**
+
+On macOS, the command looks for a `.app` bundle in `dist/` first, falling back to the raw binary. It runs `codesign --force --deep --sign <identity> --options runtime` and verifies the signature. If `--notarize` is passed, it zips the app, submits via `xcrun notarytool`, waits for completion, and staples the ticket with `xcrun stapler staple`.
+
+On Windows, it invokes `signtool sign` with SHA256 digest and DigiCert timestamping.
+
+On Linux, it creates a detached ASCII-armored GPG signature (`dist/<appname>.asc`).
+
+**Example**
+
+```sh
+# macOS ad-hoc signing
+butter sign
+
+# macOS distribution signing with notarization
+butter sign --identity "Developer ID Application: My Company" \
+  --notarize --apple-id me@example.com --team-id ABCDE12345 --password @keychain:AC_PASSWORD
+
+# Windows
+butter sign --pfx cert.pfx --pfx-password secret
+
+# Linux
+butter sign --identity 0xABCDEF01
 ```
 
 ---

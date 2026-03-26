@@ -1,36 +1,30 @@
 import type { Plugin, HostContext } from "../../types"
 
-type TrayItem = {
-  label: string
-  action: string
-}
+type TrayItem =
+  | { label: string; action: string }
+  | { separator: true }
 
 type TrayOptions = {
   title?: string
+  tooltip?: string
   items?: TrayItem[]
 }
 
 const host = (ctx: HostContext): void => {
   ctx.on("tray:set", (data: unknown) => {
     const opts = data as TrayOptions
-
-    // Attempt native tray via FFI on macOS; fall back gracefully
-    try {
-      const { initTray, setTrayTitle } = require("./native")
-
-      if (opts.title) {
-        setTrayTitle(opts.title)
-      } else {
-        initTray({
-          title: opts.title ?? "",
-          items: opts.items ?? [],
-          onAction: (action: string) => ctx.send("tray:action", { action }),
-        })
-      }
-    } catch {
-      // FFI unavailable in this environment; no-op
+    const runtime = globalThis.__butterRuntime
+    if (runtime) {
+      runtime.control("tray:set", opts)
     }
+    return { ok: true }
+  })
 
+  ctx.on("tray:remove", () => {
+    const runtime = globalThis.__butterRuntime
+    if (runtime) {
+      runtime.control("tray:remove")
+    }
     return { ok: true }
   })
 }
@@ -41,6 +35,9 @@ const webview = (): string => `
   window.butter.tray = {
     set: function (opts) {
       return window.butter.invoke("tray:set", opts);
+    },
+    remove: function () {
+      return window.butter.invoke("tray:remove");
     }
   };
 })();

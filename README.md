@@ -138,6 +138,16 @@ build:
 bundle:
   identifier: com.example.myapp
   category: public.app-category.utilities
+  urlSchemes:
+    - myapp
+
+security:
+  csp: "default-src 'self' butter:"
+  allowlist:
+    - "dialog:*"
+    - "greet"
+
+splash: src/app/splash.html
 
 plugins:
   - butter-plugin-dialog
@@ -334,6 +344,7 @@ butter init <name> [--template vanilla|react|svelte|vue]
 butter dev           Start development mode (hot reload + DevTools)
 butter compile       Build a single-file binary
 butter bundle        Create OS-native app package (.app / AppDir)
+butter sign          Code-sign and notarize the app bundle
 butter doctor        Check platform prerequisites
 ```
 
@@ -376,14 +387,55 @@ $ butter doctor
 
 Built-in plugins for common native capabilities:
 
+### Window & UI
+
 | Plugin | Capabilities |
 |--------|-------------|
-| `dialog` | Native open/save file dialogs |
-| `notifications` | OS notification center |
-| `clipboard` | Read/write system clipboard |
-| `tray` | System tray icon with menu |
-| `globalshortcuts` | Hotkeys that work when app is unfocused |
-| `autoupdater` | Check for updates, download new versions |
+| `dialog` | Native open, save, and folder selection dialogs |
+| `navigation` | Webview navigation control (back, forward, reload) |
+| `findinpage` | In-page text search with highlight and match cycling |
+| `dock` | macOS Dock badge, bounce, and progress bar |
+
+### System
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `tray` | System tray icon with context menu |
+| `notifications` | OS notification center with actions and grouping |
+| `clipboard` | Read and write system clipboard (text, image, rich text) |
+| `globalshortcuts` | Register hotkeys that work when the app is unfocused |
+| `shell` | Open URLs, files, and folders in the default application |
+| `theme` | Detect and respond to system light/dark mode changes |
+| `lifecycle` | App lifecycle events (ready, will-quit, activate, reopen) |
+
+### Data & Storage
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `fs` | Sandboxed file system access (read, write, watch) |
+| `securestorage` | Encrypted key-value storage backed by OS keychain |
+| `downloads` | Download files with progress tracking and destination control |
+
+### Monitoring
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `network` | Online/offline detection and connectivity change events |
+| `logging` | Structured logging to file with rotation and log levels |
+| `crashreporter` | Capture and report uncaught exceptions and native crashes |
+
+### Updates
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `autoupdater` | Check for updates, download, and apply new versions |
+
+### Localization
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `i18n` | Internationalization with locale detection and string lookup |
+| `accessibility` | Screen reader announcements and accessibility attributes |
 
 ```ts
 import { on } from "butter"
@@ -400,8 +452,8 @@ on("open-file", async () => {
 | Platform | Webview | Compiler | Status |
 |----------|---------|----------|--------|
 | macOS | WKWebView | clang (Xcode CLI tools) | Supported |
-| Linux | WebKitGTK | cc/gcc | Written |
-| Windows | WebView2 | MSVC/MinGW | Written |
+| Linux | WebKitGTK | cc/gcc | Supported |
+| Windows | WebView2 | MSVC/MinGW | Supported |
 
 ### macOS
 

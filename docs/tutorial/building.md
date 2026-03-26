@@ -46,26 +46,135 @@ The binary is around 60MB. Most of that is the Bun runtime, which is embedded by
 
 Your app code, assets, and the native shim add a few hundred KB on top.
 
+## Bundling
+
+After compilation, `butter bundle` wraps the standalone binary in a platform-native application package. This is the step that turns a raw executable into something users expect to see on their OS.
+
+```bash
+butter bundle
+```
+
+### macOS
+
+On macOS, `butter bundle` creates a `.app` bundle in `dist/`:
+
+```
+dist/My App.app/
+  Contents/
+    Info.plist
+    MacOS/
+      myapp          # the compiled binary
+    Resources/
+      icon.icns      # if window.icon is set in butter.yaml
+```
+
+The generated `Info.plist` includes the app name, bundle identifier, version, and category. If you have configured `bundle.urlSchemes` in `butter.yaml`, the plist will include `CFBundleURLTypes` entries so the OS routes those URLs to your app.
+
+### Linux
+
+On Linux, `butter bundle` creates an AppDir:
+
+```
+dist/My App.AppDir/
+  AppRun              # symlink to usr/bin/<binary>
+  usr/bin/myapp       # the compiled binary
+  myapp.desktop       # freedesktop .desktop entry
+  icon.png            # if window.icon is set in butter.yaml
+```
+
+The AppDir is not directly distributable as-is. To produce a `.AppImage`, run `appimagetool` on the directory:
+
+```bash
+appimagetool "dist/My App.AppDir"
+```
+
+### URL scheme registration
+
+To register custom URL schemes, add `bundle.urlSchemes` to `butter.yaml`:
+
+```yaml
+bundle:
+  identifier: com.mycompany.myapp
+  urlSchemes:
+    - myapp
+```
+
+After bundling, `myapp://` URLs will open your application on both macOS and Linux.
+
+## Code Signing
+
+`butter sign` handles code signing for each platform. It operates on whatever is in `dist/` -- preferring the `.app` bundle on macOS, falling back to the raw binary.
+
+### macOS
+
+Ad-hoc signing (good enough for local testing):
+
+```bash
+butter sign
+```
+
+For distribution, sign with your Developer ID and notarize:
+
+```bash
+butter sign \
+  --identity "Developer ID Application: My Company (ABCDE12345)" \
+  --entitlements entitlements.plist \
+  --notarize \
+  --apple-id me@example.com \
+  --team-id ABCDE12345 \
+  --password @keychain:AC_PASSWORD
+```
+
+The notarization flags (`--apple-id`, `--team-id`, `--password`) can also be provided as environment variables `APPLE_ID`, `APPLE_TEAM_ID`, and `APPLE_APP_PASSWORD` respectively. When `--notarize` is passed, Butter zips the `.app`, submits it to Apple's notary service via `xcrun notarytool`, waits for the result, and staples the ticket on success.
+
+### Windows
+
+```bash
+butter sign --pfx certificate.pfx --pfx-password secret
+```
+
+This invokes `signtool` with SHA256 and DigiCert timestamping.
+
+### Linux
+
+```bash
+butter sign
+# or with a specific GPG key:
+butter sign --identity 0xABCDEF01
+```
+
+This creates a detached signature at `dist/<appname>.asc` using `gpg --detach-sign --armor`.
+
 ## Distribution
 
-The binary is self-contained and has no runtime dependencies beyond the OS webview:
+The full workflow from source to distributable artifact:
+
+```bash
+# 1. Compile the standalone binary
+butter compile
+
+# 2. Wrap it in a native app package
+butter bundle
+
+# 3. Code sign (and notarize on macOS)
+butter sign --identity "Developer ID Application: ..." --notarize ...
+
+# 4. Distribute
+#    macOS: ship the .app (in a .dmg or .zip)
+#    Linux: run appimagetool on the .AppDir, then distribute the .AppImage
+#    Windows: ship the signed .exe (in an installer or .zip)
+```
+
+Each step depends on the previous one. `butter bundle` requires the compiled binary from `butter compile`. `butter sign` operates on the bundle (or binary) produced by the earlier steps.
+
+### Runtime dependencies
+
+The binary is self-contained except for the OS webview:
 
 - macOS: WKWebView is part of the OS. No additional libraries needed.
 - Linux: Requires WebKitGTK to be installed on the user's machine. It is typically present on any desktop Linux system, but is not embedded in the binary.
 
-### macOS
-
-The binary runs directly:
-
-```bash
-./dist/myapp
-```
-
-For App Store distribution or signed distribution, you will need to wrap the binary in a `.app` bundle and sign it with your Developer ID. Butter does not currently automate this step.
-
-### Linux
-
-Users need WebKitGTK:
+Linux users need WebKitGTK:
 
 ```bash
 # Ubuntu/Debian
@@ -76,12 +185,6 @@ sudo dnf install webkit2gtk4.1-devel
 
 # Arch
 sudo pacman -S webkit2gtk-4.1
-```
-
-Then run:
-
-```bash
-./dist/myapp
 ```
 
 ## Development vs. Production Builds

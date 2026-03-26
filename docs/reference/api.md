@@ -104,15 +104,7 @@ getWindow(): WindowOptions
 
 **Returns**
 
-```ts
-{
-  title: string
-  width: number
-  height: number
-}
-```
-
-The returned object is a shallow copy; mutating it has no effect.
+A `WindowOptions` object (see the types reference for the full list of fields). The returned object is a shallow copy; mutating it has no effect.
 
 **Example**
 
@@ -128,10 +120,10 @@ on("window-info", () => {
 
 ### `setWindow(opts)`
 
-Updates the window state. Currently modifies the in-memory `WindowOptions` record. The shim does not receive a live resize or retitle signal in the current implementation; this function is primarily useful for tracking state that the runtime or host code reads back.
+Updates the window state and sends a `window:set` control message to the shim so the native window reflects the change immediately (resize, retitle, reposition, etc.).
 
 ```ts
-setWindow(opts: Partial<WindowOptions>): void
+setWindow(opts: Partial<WindowOptions>): Promise<unknown>
 ```
 
 **Parameters**
@@ -150,6 +142,255 @@ on("rename", (title) => {
   return getWindow()
 })
 ```
+
+---
+
+## Window Control
+
+These functions send control messages to the native shim and return a `Promise` that resolves when the shim acknowledges the command.
+
+```ts
+import { maximize, minimize, restore, fullscreen, setAlwaysOnTop, closeWindow } from "butter"
+```
+
+---
+
+### `maximize()`
+
+Maximizes the main window to fill the screen.
+
+```ts
+maximize(): Promise<unknown>
+```
+
+---
+
+### `minimize()`
+
+Minimizes the main window to the dock/taskbar.
+
+```ts
+minimize(): Promise<unknown>
+```
+
+---
+
+### `restore()`
+
+Restores the window from a minimized or maximized state to its previous dimensions.
+
+```ts
+restore(): Promise<unknown>
+```
+
+---
+
+### `fullscreen(enable)`
+
+Toggles native fullscreen mode on the main window.
+
+```ts
+fullscreen(enable: boolean): Promise<unknown>
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `enable` | `boolean` | `true` to enter fullscreen, `false` to exit. |
+
+---
+
+### `setAlwaysOnTop(enable)`
+
+Sets whether the window floats above all other windows.
+
+```ts
+setAlwaysOnTop(enable: boolean): Promise<unknown>
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `enable` | `boolean` | `true` to pin the window on top, `false` to restore normal z-order. |
+
+---
+
+### `closeWindow(windowId?)`
+
+Closes a window by its ID. When called without an argument, closes the main window.
+
+```ts
+closeWindow(windowId?: string): Promise<unknown>
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `windowId` | `string` (optional) | The ID returned by `createWindow()`. Omit to close the main window. |
+
+---
+
+## Multi-Window
+
+```ts
+import { createWindow } from "butter"
+```
+
+---
+
+### `createWindow(opts)`
+
+Creates a new native window and returns its unique identifier. The new window loads the URL specified in `opts.url`.
+
+```ts
+createWindow(opts: CreateWindowOptions): string
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `opts` | `CreateWindowOptions` | Configuration for the new window. |
+
+**`CreateWindowOptions`**
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | `string` | The URL or file path to load in the new window. |
+| `title` | `string` (optional) | Window title. |
+| `width` | `number` (optional) | Initial width in pixels. |
+| `height` | `number` (optional) | Initial height in pixels. |
+| `x` | `number` (optional) | Horizontal position in screen coordinates. |
+| `y` | `number` (optional) | Vertical position in screen coordinates. |
+| `frameless` | `boolean` (optional) | Remove the native title bar and frame. |
+| `transparent` | `boolean` (optional) | Allow the window background to be transparent. |
+| `alwaysOnTop` | `boolean` (optional) | Float the window above all others. |
+| `modal` | `boolean` (optional) | Open as a modal window attached to the main window. |
+
+**Returns**
+
+A `string` window ID. Pass this to `closeWindow()` to close the window later.
+
+**Example**
+
+```ts
+import { createWindow, closeWindow } from "butter"
+
+const settingsId = createWindow({
+  url: "settings.html",
+  title: "Settings",
+  width: 480,
+  height: 360,
+  modal: true,
+})
+
+on("close-settings", () => {
+  closeWindow(settingsId)
+})
+```
+
+---
+
+## Content
+
+```ts
+import { setMenu, print, screenshot, ready, listScreens, sendChunk } from "butter"
+```
+
+---
+
+### `setMenu(menu)`
+
+Replaces the application menu bar at runtime. The `menu` argument uses the same `Menu` type described in the types reference.
+
+```ts
+setMenu(menu: unknown): Promise<unknown>
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `menu` | `Menu` | The new menu structure. |
+
+---
+
+### `print()`
+
+Opens the native print dialog for the current webview content.
+
+```ts
+print(): Promise<unknown>
+```
+
+---
+
+### `screenshot(path)`
+
+Captures the webview content and writes it to a PNG file at the given path.
+
+```ts
+screenshot(path: string): Promise<unknown>
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `path` | `string` | Absolute file path where the PNG will be saved. |
+
+---
+
+### `ready()`
+
+Signals to the shim that the application is ready to be shown. When a splash screen is configured in `butter.yaml`, calling `ready()` swaps the splash screen for the main webview content.
+
+```ts
+ready(): Promise<unknown>
+```
+
+**Example**
+
+```ts
+import { ready } from "butter"
+
+// After all initial data is loaded
+ready()
+```
+
+---
+
+### `listScreens()`
+
+Returns information about all connected monitors, including their positions, sizes, and scale factors.
+
+```ts
+listScreens(): Promise<unknown>
+```
+
+**Returns**
+
+A `Promise` resolving to an array of screen descriptor objects, each containing position, size, and `scaleFactor` fields.
+
+---
+
+### `sendChunk(requestId, data)`
+
+Sends a streaming chunk to a pending webview request. Use this to stream data back to the webview incrementally rather than returning all data at once from a handler.
+
+```ts
+sendChunk(requestId: string, data: unknown): void
+```
+
+**Parameters**
+
+| Parameter | Type | Description |
+|---|---|---|
+| `requestId` | `string` | The ID of the in-flight request to send data to. |
+| `data` | `unknown` | The chunk payload. Must be JSON-serializable. |
 
 ---
 

@@ -7,6 +7,17 @@ import type { Config } from "../types"
 
 // ── macOS ──────────────────────────────────────────────────────────────────
 
+const generateUrlSchemesPlist = (config: Config): string => {
+  const schemes = config.bundle?.urlSchemes
+  if (!schemes || schemes.length === 0) return ""
+
+  const entries = schemes.map((s) =>
+    `\t\t<dict>\n\t\t\t<key>CFBundleURLName</key>\n\t\t\t<string>${config.bundle?.identifier ?? "com.example.app"}</string>\n\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n\t\t\t\t<string>${s}</string>\n\t\t\t</array>\n\t\t</dict>`,
+  ).join("\n")
+
+  return `\t<key>CFBundleURLTypes</key>\n\t<array>\n${entries}\n\t</array>\n`
+}
+
 const generatePlist = (config: Config, executableName: string, hasIcon: boolean): string => {
   const identifier = config.bundle?.identifier ?? `com.example.${executableName}`
   const category = config.bundle?.category ?? "public.app-category.utilities"
@@ -37,6 +48,7 @@ const generatePlist = (config: Config, executableName: string, hasIcon: boolean)
 \t<string>${category}</string>
 ${iconEntry}\t<key>NSHighResolutionCapable</key>
 \t<true/>
+${generateUrlSchemesPlist(config)}
 </dict>
 </plist>
 `
@@ -87,13 +99,16 @@ const generateDesktopEntry = (config: Config, executableName: string, hasIcon: b
   const category = config.bundle?.category ?? "Utility"
   const iconLine = hasIcon ? `Icon=${executableName}` : `Icon=application-default-icon`
 
+  const mimeTypes = (config.bundle?.urlSchemes ?? []).map((s) => `x-scheme-handler/${s}`).join(";")
+  const mimeLine = mimeTypes ? `MimeType=${mimeTypes};\n` : ""
+
   return `[Desktop Entry]
 Type=Application
 Name=${config.window.title}
-Exec=${executableName}
+Exec=${executableName} %u
 ${iconLine}
 Categories=${category};
-X-AppImage-Name=${config.window.title}
+${mimeLine}X-AppImage-Name=${config.window.title}
 X-AppImage-Version=1.0.0
 X-AppImage-Arch=x86_64
 `

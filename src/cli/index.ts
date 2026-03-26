@@ -23,6 +23,10 @@ const commands: Record<string, () => Promise<void>> = {
     const { runBundle } = await import("./bundle")
     await runBundle(process.cwd())
   },
+  sign: async () => {
+    const { runSign } = await import("./sign")
+    await runSign(process.cwd(), process.argv.slice(3))
+  },
 }
 
 const run = async () => {
@@ -35,6 +39,7 @@ const run = async () => {
     console.log("  compile        Build a single-file binary")
     console.log("  compile --target darwin|linux|windows")
     console.log("  bundle         Wrap compiled binary in a native app package")
+    console.log("  sign           Code sign and optionally notarize the app")
     console.log("  doctor         Check platform prerequisites")
     return
   }

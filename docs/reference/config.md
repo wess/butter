@@ -18,6 +18,19 @@ build:
   entry: string      # default: "src/app/index.html"
   host: string       # default: "src/host/index.ts"
 
+bundle:
+  identifier: string # default: undefined
+  category: string   # default: undefined
+  urlSchemes:        # default: undefined
+    - string
+
+security:
+  csp: string        # default: undefined
+  allowlist:         # default: undefined (allow all)
+    - string
+
+splash: string       # default: undefined
+
 plugins:             # optional
   - string
 ```
@@ -110,6 +123,107 @@ build:
 
 ---
 
+## `bundle`
+
+Controls OS-native app packaging produced by `butter bundle`.
+
+### `bundle.identifier`
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | `undefined` |
+
+The application identifier used for the app bundle. On macOS this becomes the `CFBundleIdentifier` in `Info.plist`.
+
+```yaml
+bundle:
+  identifier: com.example.myapp
+```
+
+### `bundle.category`
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | `undefined` |
+
+The macOS application category. Used as `LSApplicationCategoryType` in `Info.plist`.
+
+```yaml
+bundle:
+  category: public.app-category.utilities
+```
+
+### `bundle.urlSchemes`
+
+| | |
+|---|---|
+| Type | `string[]` |
+| Default | `undefined` |
+
+Custom URL schemes for deep linking. Registers the app as a handler for the given schemes so that URLs like `myapp://path` open the application.
+
+```yaml
+bundle:
+  urlSchemes:
+    - myapp
+```
+
+---
+
+## `security`
+
+Controls webview security policies.
+
+### `security.csp`
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | `undefined` |
+
+A Content-Security-Policy header applied to the webview. Use this to restrict which resources the webview can load.
+
+```yaml
+security:
+  csp: "default-src 'self' butter:"
+```
+
+### `security.allowlist`
+
+| | |
+|---|---|
+| Type | `string[]` |
+| Default | `undefined` (allow all) |
+
+Restricts which IPC actions the webview is permitted to call. Supports exact matches, namespace wildcards, and a global wildcard.
+
+```yaml
+security:
+  allowlist:
+    - "dialog:*"    # Namespace wildcard
+    - "greet"       # Exact match
+    - "*"           # Allow all (default when omitted)
+```
+
+---
+
+## `splash`
+
+| | |
+|---|---|
+| Type | `string` |
+| Default | `undefined` |
+
+Path to an HTML file shown while the app loads, relative to the project root. The splash screen is displayed immediately when the window opens and is swapped out for the main entry point once `ready()` is called.
+
+```yaml
+splash: src/app/splash.html
+```
+
+---
+
 ## `plugins`
 
 | | |
@@ -117,7 +231,7 @@ build:
 | Type | `string[]` |
 | Default | `undefined` (no plugins) |
 
-A list of plugin module paths or package names. Plugin support is declared in the type system but not yet implemented in the runtime. This field is parsed and stored in the `Config` object for forward compatibility.
+A list of plugin module paths or package names. Butter imports each plugin module at startup, calls `host()` to register IPC handlers, and injects the `webview()` string into the webview before the page loads. Plugins are loaded in the order listed.
 
 ```yaml
 plugins:
@@ -142,6 +256,9 @@ The following object is returned when `butter.yaml` is absent or a field is omit
     entry: "src/app/index.html",
     host: "src/host/index.ts",
   },
+  bundle: undefined,
+  security: undefined,
+  splash: undefined,
 }
 ```
 
@@ -158,6 +275,20 @@ window:
 build:
   entry: src/app/index.html
   host: src/host/index.ts
+
+bundle:
+  identifier: com.example.mydesktopapp
+  category: public.app-category.utilities
+  urlSchemes:
+    - mydesktopapp
+
+security:
+  csp: "default-src 'self' butter:"
+  allowlist:
+    - "dialog:*"
+    - "greet"
+
+splash: src/app/splash.html
 ```
 
 ---

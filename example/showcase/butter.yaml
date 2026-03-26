@@ -1,0 +1,22 @@
+window:
+  title: "Butter Showcase"
+  width: 1000
+  height: 700
+  icon: assets/icon.png
+
+build:
+  entry: src/app/index.html
+  host: src/host/index.ts
+
+bundle:
+  identifier: com.butter.showcase
+  category: public.app-category.developer-tools
+  urlSchemes:
+    - buttershowcase
+
+security:
+  csp: "default-src 'self' butter: 'unsafe-inline'"
+  allowlist:
+    - "*"
+
+splash: src/app/splash.html

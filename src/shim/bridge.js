@@ -5,9 +5,9 @@
 
   window.__butterReceive = function (json) {
     const msg = JSON.parse(json)
-    if (msg.type === "chunk") {
-      var e = pending.get(msg.id)
-      if (e && e.onChunk) e.onChunk(msg.data)
+    if (msg.type === "response" && msg.action === "chunk" && msg.data) {
+      const entry = pending.get(msg.data.id)
+      if (entry && entry.onChunk) entry.onChunk(msg.data.data)
     } else if (msg.type === "response") {
       const entry = pending.get(msg.id)
       if (entry) {
@@ -67,7 +67,7 @@
     },
   }
 
-  // Set up drag and drop — forward file drops to host
+  // Drag and drop — forward file drops to host
   document.addEventListener("dragover", (e) => e.preventDefault())
   document.addEventListener("drop", (e) => {
     e.preventDefault()

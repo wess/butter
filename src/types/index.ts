@@ -5,6 +5,15 @@ export type WindowOptions = {
   width: number
   height: number
   icon?: string
+  x?: number
+  y?: number
+  minWidth?: number
+  minHeight?: number
+  resizable?: boolean
+  frameless?: boolean
+  transparent?: boolean
+  alwaysOnTop?: boolean
+  fullscreen?: boolean
 }
 
 export type BuildOptions = {
@@ -15,6 +24,12 @@ export type BuildOptions = {
 export type BundleOptions = {
   identifier?: string
   category?: string
+  urlSchemes?: string[]
+}
+
+export type SecurityOptions = {
+  csp?: string
+  allowlist?: string[]
 }
 
 export type Config = {
@@ -22,6 +37,8 @@ export type Config = {
   build: BuildOptions
   bundle?: BundleOptions
   plugins?: string[]
+  security?: SecurityOptions
+  splash?: string
 }
 
 export type MenuItem =

@@ -1,0 +1,15 @@
+{
+  "name": "butter-showcase",
+  "module": "src/host/index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "butter": "file:../../"
+  },
+  "scripts": {
+    "dev": "butter dev",
+    "build": "butter compile",
+    "bundle": "butter bundle"
+  }
+}

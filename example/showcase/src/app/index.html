@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Butter Showcase</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <!-- Sidebar navigation -->
+    <aside class="sidebar">
+      <div class="brand">
+        Butter
+        <span>Showcase App</span>
+      </div>
+      <nav id="nav">
+        <button data-section="invoke" class="active">Invoke / IPC</button>
+        <button data-section="system">System Info</button>
+        <button data-section="window">Window Controls</button>
+        <button data-section="dialogs">Dialogs</button>
+        <button data-section="clipboard">Clipboard</button>
+        <button data-section="theme">Theme</button>
+        <button data-section="tray">Tray</button>
+        <button data-section="notifications">Notifications</button>
+        <button data-section="filesystem">File System</button>
+        <button data-section="streaming">Streaming</button>
+        <button data-section="events">Events</button>
+        <button data-section="context">Context Menu</button>
+      </nav>
+      <div class="status" id="status">
+        <span class="dot"></span> Connected
+        <div id="tickinfo">Waiting for host tick...</div>
+      </div>
+    </aside>
+
+    <!-- Main content area -->
+    <main class="content" id="content">
+
+      <!-- Invoke / IPC -->
+      <div class="section visible" id="sec-invoke">
+        <h2>Invoke / IPC</h2>
+        <p class="subtitle">Call host handlers and get responses via butter.invoke()</p>
+
+        <div class="card">
+          <h3>Greet Handler</h3>
+          <div class="inputrow">
+            <input type="text" id="greetinput" placeholder="Enter your name..." value="World" />
+            <button class="btn primary" id="greetbtn">Invoke "greet"</button>
+          </div>
+          <div class="output" id="greetoutput">Click the button to invoke the greet handler.</div>
+        </div>
+
+        <div class="card">
+          <h3>Environment</h3>
+          <p class="subtitle" style="margin-bottom: 0.75rem;">Fetch host environment variables via invoke</p>
+          <button class="btn" id="envbtn">Get Environment</button>
+          <div class="output" id="envoutput" style="margin-top: 0.5rem;"></div>
+        </div>
+      </div>
+
+      <!-- System Info -->
+      <div class="section" id="sec-system">
+        <h2>System Info</h2>
+        <p class="subtitle">Runtime and platform information from the host process</p>
+
+        <div class="card">
+          <h3>Platform Details</h3>
+          <button class="btn primary" id="sysinfobtn" style="margin-bottom: 0.75rem;">Refresh System Info</button>
+          <div class="infogrid" id="sysinfogrid"></div>
+        </div>
+
+        <div class="card">
+          <h3>Screen Info</h3>
+          <button class="btn" id="screenbtn" style="margin-bottom: 0.75rem;">List Screens</button>
+          <div class="output" id="screenoutput"></div>
+        </div>
+      </div>
+
+      <!-- Window Controls -->
+      <div class="section" id="sec-window">
+        <h2>Window Controls</h2>
+        <p class="subtitle">Manage the application window from the webview</p>
+
+        <div class="card">
+          <h3>Window Actions</h3>
+          <div class="btngroup">
+            <button class="btn" id="winmaximize">Maximize</button>
+            <button class="btn" id="winminimize">Minimize</button>
+            <button class="btn" id="winfullscreen">Enter Fullscreen</button>
+            <button class="btn" id="winexitfullscreen">Exit Fullscreen</button>
+          </div>
+          <div class="btngroup">
+            <button class="btn" id="winalwaysontop">Always on Top: ON</button>
+            <button class="btn" id="winalwaysontopoff">Always on Top: OFF</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Resize Window</h3>
+          <div class="inputrow">
+            <input type="number" id="winwidth" placeholder="Width" value="1000" style="max-width: 100px;" />
+            <input type="number" id="winheight" placeholder="Height" value="700" style="max-width: 100px;" />
+            <button class="btn" id="winresize">Resize</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Set Title</h3>
+          <div class="inputrow">
+            <input type="text" id="wintitle" placeholder="New title..." value="Butter Showcase" />
+            <button class="btn" id="winsettitle">Set Title</button>
+          </div>
+        </div>
+
+        <div class="output" id="windowoutput"></div>
+      </div>
+
+      <!-- Dialogs -->
+      <div class="section" id="sec-dialogs">
+        <h2>Dialogs</h2>
+        <p class="subtitle">Native system dialogs: open, save, folder, message, alert, confirm</p>
+
+        <div class="card">
+          <h3>File Dialogs</h3>
+          <div class="btngroup">
+            <button class="btn" id="dlgopen">Open File</button>
+            <button class="btn" id="dlgsave">Save File</button>
+            <button class="btn" id="dlgfolder">Select Folder</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>Message Dialogs</h3>
+          <div class="btngroup">
+            <button class="btn" id="dlgalert">Alert</button>
+            <button class="btn" id="dlgconfirm">Confirm</button>
+            <button class="btn" id="dlgmsginfo">Info Message</button>
+            <button class="btn" id="dlgmsgwarn">Warning Message</button>
+            <button class="btn" id="dlgmsgerr">Error Message</button>
+          </div>
+        </div>
+
+        <div class="output" id="dialogoutput"></div>
+      </div>
+
+      <!-- Clipboard -->
+      <div class="section" id="sec-clipboard">
+        <h2>Clipboard</h2>
+        <p class="subtitle">Read and write the system clipboard</p>
+
+        <div class="card">
+          <h3>Clipboard Operations</h3>
+          <div class="inputrow">
+            <input type="text" id="clipinput" placeholder="Text to copy..." value="Hello from Butter!" />
+            <button class="btn primary" id="clipwrite">Write to Clipboard</button>
+          </div>
+          <button class="btn" id="clipread" style="margin-bottom: 0.5rem;">Read Clipboard</button>
+          <div class="output" id="clipoutput"></div>
+        </div>
+      </div>
+
+      <!-- Theme -->
+      <div class="section" id="sec-theme">
+        <h2>Theme</h2>
+        <p class="subtitle">Detect system theme and listen for changes</p>
+
+        <div class="card">
+          <h3>Current Theme</h3>
+          <button class="btn primary" id="themebtn" style="margin-bottom: 0.75rem;">Detect Theme</button>
+          <div class="output" id="themeoutput">Theme changes will also appear here automatically.</div>
+        </div>
+      </div>
+
+      <!-- Tray -->
+      <div class="section" id="sec-tray">
+        <h2>System Tray</h2>
+        <p class="subtitle">Set up and remove a system tray icon with menu items</p>
+
+        <div class="card">
+          <h3>Tray Controls</h3>
+          <div class="btngroup">
+            <button class="btn primary" id="trayset">Set Tray</button>
+            <button class="btn" id="trayremove">Remove Tray</button>
+          </div>
+          <div class="output" id="trayoutput"></div>
+        </div>
+      </div>
+
+      <!-- Notifications -->
+      <div class="section" id="sec-notifications">
+        <h2>Notifications</h2>
+        <p class="subtitle">Send native system notifications from the webview</p>
+
+        <div class="card">
+          <h3>Send Notification</h3>
+          <div class="inputrow">
+            <input type="text" id="notifytitle" placeholder="Title" value="Butter Notification" />
+            <input type="text" id="notifybody" placeholder="Body" value="This is a test notification!" />
+          </div>
+          <button class="btn primary" id="notifybtn">Send Notification</button>
+          <div class="output" id="notifyoutput" style="margin-top: 0.5rem;"></div>
+        </div>
+      </div>
+
+      <!-- File System -->
+      <div class="section" id="sec-filesystem">
+        <h2>File System</h2>
+        <p class="subtitle">Read, write, and browse files via the fs plugin</p>
+
+        <div class="card">
+          <h3>Browse Directory</h3>
+          <div class="inputrow">
+            <input type="text" id="fspath" placeholder="Enter path..." value="/" />
+            <button class="btn primary" id="fsbrowse">Browse</button>
+          </div>
+          <div class="output" id="fsoutput" style="max-height: 300px;"></div>
+        </div>
+
+        <div class="card">
+          <h3>Read File</h3>
+          <div class="inputrow">
+            <input type="text" id="fsreadpath" placeholder="File path to read..." />
+            <button class="btn" id="fsread">Read</button>
+          </div>
+          <div class="output" id="fsreadoutput" style="max-height: 200px;"></div>
+        </div>
+      </div>
+
+      <!-- Streaming -->
+      <div class="section" id="sec-streaming">
+        <h2>Streaming</h2>
+        <p class="subtitle">Receive chunked data from the host via sendChunk</p>
+
+        <div class="card">
+          <h3>Counting Stream</h3>
+          <p class="subtitle" style="margin-bottom: 0.75rem;">Host counts to N, sending each number as a chunk</p>
+          <div class="inputrow">
+            <input type="number" id="streammax" placeholder="Count to..." value="15" style="max-width: 100px;" />
+            <button class="btn primary" id="streambtn">Start Stream</button>
+          </div>
+          <div class="progressbar" id="streamprogress">
+            <div class="fill" id="streamfill"></div>
+          </div>
+          <div class="output" id="streamoutput" style="margin-top: 0.5rem;"></div>
+        </div>
+      </div>
+
+      <!-- Events -->
+      <div class="section" id="sec-events">
+        <h2>Events</h2>
+        <p class="subtitle">Listen for events pushed from the host process</p>
+
+        <div class="card">
+          <h3>Host Tick Events</h3>
+          <p class="subtitle" style="margin-bottom: 0.5rem;">
+            The host sends a tick event every 3 seconds with memory info.
+            These are received via butter.on() and displayed below.
+          </p>
+          <div class="output" id="eventoutput">Waiting for events...</div>
+        </div>
+
+        <div class="card">
+          <h3>Event Listener Controls</h3>
+          <div class="btngroup">
+            <button class="btn primary" id="eventon">Subscribe to Ticks</button>
+            <button class="btn" id="eventoff">Unsubscribe</button>
+            <button class="btn" id="eventclear">Clear Log</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Context Menu -->
+      <div class="section" id="sec-context">
+        <h2>Context Menu</h2>
+        <p class="subtitle">Show a native context menu on right-click</p>
+
+        <div class="card" id="contextarea" style="min-height: 150px; display: flex; align-items: center; justify-content: center; cursor: context-menu;">
+          <p style="color: var(--text-dim);">Right-click anywhere in this card to see the context menu</p>
+        </div>
+        <div class="output" id="contextoutput"></div>
+      </div>
+
+    </main>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

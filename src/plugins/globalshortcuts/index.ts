@@ -10,24 +10,7 @@ type RegisterOptions = {
   id: string
 }
 
-// Registry of active shortcuts keyed by id.
-// TODO: wire these into Carbon/CGEvent hotkey registration via Bun FFI.
-// The Carbon API requires:
-//   RegisterEventHotKey(keyCode, modifiers, hotkeyID, GetApplicationEventTarget(), 0, &hotkeyRef)
-// and an event loop handler installed via InstallEventHandler.
-// This requires the process to run a Carbon/AppKit event loop (main thread).
-// For v0.1 the registry tracks registrations so the structure is in place.
 const registry = new Map<string, RegisterOptions>()
-
-const registerShortcut = (opts: RegisterOptions): void => {
-  registry.set(opts.id, opts)
-  // TODO: native Carbon hotkey registration
-}
-
-const unregisterShortcut = (id: string): void => {
-  registry.delete(id)
-  // TODO: native Carbon hotkey unregistration
-}
 
 const host = (ctx: HostContext): void => {
   ctx.on("shortcut:register", (data: unknown) => {
@@ -37,12 +20,15 @@ const host = (ctx: HostContext): void => {
       return { ok: false, error: "id and shortcut.key are required" }
     }
 
-    try {
-      registerShortcut(opts)
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    registry.set(opts.id, opts)
+
+    // Send control message to shim for native registration
+    const runtime = globalThis.__butterRuntime
+    if (runtime) {
+      runtime.control("shortcut:register", opts)
     }
+
+    return { ok: true }
   })
 
   ctx.on("shortcut:unregister", (data: unknown) => {
@@ -52,12 +38,21 @@ const host = (ctx: HostContext): void => {
       return { ok: false, error: "id is required" }
     }
 
-    try {
-      unregisterShortcut(id)
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    registry.delete(id)
+
+    const runtime = globalThis.__butterRuntime
+    if (runtime) {
+      runtime.control("shortcut:unregister", { id })
     }
+
+    return { ok: true }
+  })
+
+  // Handle shortcut:triggered events from shim
+  ctx.on("shortcut:triggered", (data: unknown) => {
+    const { id } = data as { id: string }
+    // Re-emit so host handlers can listen
+    ctx.send("shortcut:triggered", { id })
   })
 }
 

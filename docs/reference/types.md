@@ -12,7 +12,10 @@ The top-level project configuration object, produced by `loadConfig()` and `pars
 type Config = {
   window: WindowOptions
   build: BuildOptions
+  bundle?: BundleOptions
   plugins?: string[]
+  security?: SecurityOptions
+  splash?: string
 }
 ```
 
@@ -20,7 +23,10 @@ type Config = {
 |---|---|---|
 | `window` | `WindowOptions` | Initial window dimensions and title. |
 | `build` | `BuildOptions` | Entry points for the webview and host. |
+| `bundle` | `BundleOptions` (optional) | Platform bundling options (identifier, URL schemes, etc.). |
 | `plugins` | `string[]` (optional) | Plugin module paths or package names. |
+| `security` | `SecurityOptions` (optional) | Content Security Policy and domain allowlist. |
+| `splash` | `string` (optional) | Path to an HTML file shown while the app loads. Call `ready()` to dismiss. |
 
 ---
 
@@ -33,6 +39,16 @@ type WindowOptions = {
   title: string
   width: number
   height: number
+  icon?: string
+  x?: number
+  y?: number
+  minWidth?: number
+  minHeight?: number
+  resizable?: boolean
+  frameless?: boolean
+  transparent?: boolean
+  alwaysOnTop?: boolean
+  fullscreen?: boolean
 }
 ```
 
@@ -41,6 +57,16 @@ type WindowOptions = {
 | `title` | `string` | Window title and process name. |
 | `width` | `number` | Initial window width in pixels. |
 | `height` | `number` | Initial window height in pixels. |
+| `icon` | `string` (optional) | Path to the window icon image. |
+| `x` | `number` (optional) | Horizontal position in screen coordinates. |
+| `y` | `number` (optional) | Vertical position in screen coordinates. |
+| `minWidth` | `number` (optional) | Minimum resizable width in pixels. |
+| `minHeight` | `number` (optional) | Minimum resizable height in pixels. |
+| `resizable` | `boolean` (optional) | Whether the window can be resized by the user. |
+| `frameless` | `boolean` (optional) | Remove the native title bar and window frame. |
+| `transparent` | `boolean` (optional) | Allow the window background to be transparent. |
+| `alwaysOnTop` | `boolean` (optional) | Float the window above all other windows. |
+| `fullscreen` | `boolean` (optional) | Start the window in fullscreen mode. |
 
 Used by:
 - `getWindow()` — returns a copy of the current window state.
@@ -64,6 +90,120 @@ type BuildOptions = {
 |---|---|---|
 | `entry` | `string` | Relative path to the HTML entry point for Bun's bundler. |
 | `host` | `string` | Relative path to the host TypeScript entry point. |
+
+---
+
+## `BundleOptions`
+
+Platform-specific bundling configuration, set in the `bundle` field of `Config`.
+
+```ts
+type BundleOptions = {
+  identifier?: string
+  category?: string
+  urlSchemes?: string[]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `identifier` | `string` (optional) | Reverse-domain bundle identifier (e.g. `"com.example.myapp"`). |
+| `category` | `string` (optional) | Application category for platform app stores and launchers. |
+| `urlSchemes` | `string[]` (optional) | Custom URL schemes the app should register to handle (e.g. `["myapp"]`). |
+
+---
+
+## `SecurityOptions`
+
+Security settings applied to the webview, set in the `security` field of `Config`.
+
+```ts
+type SecurityOptions = {
+  csp?: string
+  allowlist?: string[]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `csp` | `string` (optional) | Content Security Policy header injected into the webview. |
+| `allowlist` | `string[]` (optional) | List of allowed origins or URL patterns the webview may navigate to. |
+
+---
+
+## `CreateWindowOptions`
+
+Options passed to `createWindow()` to open an additional native window.
+
+```ts
+type CreateWindowOptions = {
+  url: string
+  title?: string
+  width?: number
+  height?: number
+  x?: number
+  y?: number
+  frameless?: boolean
+  transparent?: boolean
+  alwaysOnTop?: boolean
+  modal?: boolean
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `url` | `string` | The URL or file path to load in the new window. |
+| `title` | `string` (optional) | Window title. |
+| `width` | `number` (optional) | Initial width in pixels. |
+| `height` | `number` (optional) | Initial height in pixels. |
+| `x` | `number` (optional) | Horizontal position in screen coordinates. |
+| `y` | `number` (optional) | Vertical position in screen coordinates. |
+| `frameless` | `boolean` (optional) | Remove the native title bar and frame. |
+| `transparent` | `boolean` (optional) | Allow the window background to be transparent. |
+| `alwaysOnTop` | `boolean` (optional) | Float the window above all others. |
+| `modal` | `boolean` (optional) | Open as a modal window attached to the main window. |
+
+---
+
+## `MessageDialogOptions`
+
+Options for `dialog.message()`, the general-purpose message dialog.
+
+```ts
+type MessageDialogOptions = {
+  title?: string
+  message: string
+  detail?: string
+  type?: "info" | "warning" | "error"
+  buttons?: string[]
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | `string` (optional) | Dialog title bar text. |
+| `message` | `string` | Primary message displayed in the dialog. |
+| `detail` | `string` (optional) | Secondary detail text shown below the primary message. |
+| `type` | `"info" \| "warning" \| "error"` (optional) | Icon style for the dialog. |
+| `buttons` | `string[]` (optional) | Labels for the dialog buttons. The index of the clicked button is returned in `MessageDialogResult.button`. |
+
+---
+
+## `MessageDialogResult`
+
+The value resolved by `dialog.message()`.
+
+```ts
+type MessageDialogResult = {
+  button: number
+  cancelled: boolean
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `button` | `number` | Zero-based index of the button the user clicked. |
+| `cancelled` | `boolean` | `true` if the user dismissed the dialog without clicking a button. |
 
 ---
 
@@ -232,7 +372,7 @@ type IpcMessage = {
 | `invoke` | webview → host | Webview requests a host handler. Expects a `response`. |
 | `response` | host → webview | Host returns the result of an `invoke`. `id` matches the original. |
 | `event` | both directions | Fire-and-forget notification. No response expected. |
-| `control` | both directions | Internal lifecycle signals: `quit`, `reload`. |
+| `control` | both directions | Lifecycle and window-management signals: `quit`, `reload`, `window:set`, `window:maximize`, `window:minimize`, `window:restore`, `window:fullscreen`, `window:close`, `window:create`, `window:print`, `window:screenshot`, `window:ready`, `menu:set`, `screen:list`, and others. |
 
 ---
 
@@ -250,10 +390,14 @@ type Runtime = {
   getWindow: () => WindowOptions
   setWindow: (opts: Partial<WindowOptions>) => void
   drainOutgoing: () => IpcMessage[]
+  createWindow: (opts: CreateWindowOptions) => string
+  sendChunk: (requestId: string, data: unknown) => void
+  control: (action: string, data?: unknown) => Promise<unknown>
+  resolveControl: (id: string, data: unknown) => void
 }
 ```
 
-Created by `createRuntime(initialWindow?)` and stored on `globalThis.__butterRuntime`. The exported `on`, `send`, `getWindow`, and `setWindow` functions delegate to this instance.
+Created by `createRuntime(initialWindow?)` and stored on `globalThis.__butterRuntime`. The exported `on`, `send`, `getWindow`, `setWindow`, `createWindow`, `sendChunk`, and all window-control functions delegate to this instance.
 
 ### `SharedRegion` (internal)
 

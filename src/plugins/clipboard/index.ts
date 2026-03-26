@@ -1,12 +1,26 @@
 import type { Plugin, HostContext } from "../../types"
 
 const readClipboard = async (): Promise<string> => {
-  const result = await Bun.$`pbpaste`.text()
-  return result
+  const platform = process.platform
+  if (platform === "darwin") {
+    return await Bun.$`pbpaste`.text()
+  } else if (platform === "linux") {
+    return await Bun.$`xclip -selection clipboard -o`.text()
+  } else if (platform === "win32") {
+    return await Bun.$`powershell -Command Get-Clipboard`.text()
+  }
+  return ""
 }
 
 const writeClipboard = async (text: string): Promise<void> => {
-  await Bun.$`echo ${text}`.pipe(Bun.$`pbcopy`)
+  const platform = process.platform
+  if (platform === "darwin") {
+    await Bun.$`echo ${text}`.pipe(Bun.$`pbcopy`)
+  } else if (platform === "linux") {
+    await Bun.$`echo ${text}`.pipe(Bun.$`xclip -selection clipboard`)
+  } else if (platform === "win32") {
+    await Bun.$`powershell -Command Set-Clipboard -Value ${text}`
+  }
 }
 
 const host = (ctx: HostContext): void => {

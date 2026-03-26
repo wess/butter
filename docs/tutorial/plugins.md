@@ -101,6 +101,60 @@ plugins:
 
 Butter imports each plugin module at startup, calls `host()` to register handlers, and injects the `webview()` string into the webview before the page loads.
 
+## Built-in Plugins
+
+Butter ships with 20 built-in plugins covering common desktop application needs.
+
+### Window & UI
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `dialog` | Native open, save, and folder selection dialogs |
+| `navigation` | Webview navigation control (back, forward, reload) |
+| `findinpage` | In-page text search with highlight and match cycling |
+| `dock` | macOS Dock badge, bounce, and progress bar |
+
+### System
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `tray` | System tray icon with context menu |
+| `notifications` | OS notification center with actions and grouping |
+| `clipboard` | Read and write system clipboard (text, image, rich text) |
+| `globalshortcuts` | Register hotkeys that work when the app is unfocused |
+| `shell` | Open URLs, files, and folders in the default application |
+| `theme` | Detect and respond to system light/dark mode changes |
+| `lifecycle` | App lifecycle events (ready, will-quit, activate, reopen) |
+
+### Data & Storage
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `fs` | Sandboxed file system access (read, write, watch) |
+| `securestorage` | Encrypted key-value storage backed by OS keychain |
+| `downloads` | Download files with progress tracking and destination control |
+
+### Monitoring
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `network` | Online/offline detection and connectivity change events |
+| `logging` | Structured logging to file with rotation and log levels |
+| `crashreporter` | Capture and report uncaught exceptions and native crashes |
+
+### Updates
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `autoupdater` | Check for updates, download, and apply new versions |
+
+### Localization
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `i18n` | Internationalization with locale detection and string lookup |
+| `accessibility` | Screen reader announcements and accessibility attributes |
+
 ## Using a Plugin in the Webview
 
 Once registered, the plugin's webview API is available on `window.butter` (or however the plugin chose to attach it):

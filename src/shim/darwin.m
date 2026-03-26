@@ -94,7 +94,9 @@ static NSString *BRIDGE_JS =
     "var p=new Map(),n=1,l=new Map();"
     "window.__butterReceive=function(j){"
       "var m=JSON.parse(j);"
-      "if(m.type==='response'){"
+      "if(m.type==='response'&&m.action==='chunk'&&m.data){"
+        "var e=p.get(m.data.id);if(e&&e.onChunk)e.onChunk(m.data.data);}"
+      "else if(m.type==='response'){"
         "var e=p.get(m.id);if(e){p.delete(m.id);if(e.timer)clearTimeout(e.timer);"
         "if(m.error)e.reject(new Error(m.error));else e.resolve(m.data);}}"
       "else if(m.type==='event'){"
@@ -109,9 +111,20 @@ static NSString *BRIDGE_JS =
         "var t=o&&o.timeout;if(t&&t>0){e.timer=setTimeout(function(){"
           "p.delete(id);rej(new Error('butter.invoke(\"'+a+'\") timed out after '+t+'ms'));},t);}"
         "p.set(id,e);send({id:id,type:'invoke',action:a,data:d});});},"
+      "stream:function(a,d,cb){return new Promise(function(res,rej){"
+        "var id=String(n++),e={resolve:res,reject:rej,timer:null,onChunk:cb};"
+        "p.set(id,e);send({id:id,type:'invoke',action:a,data:d,stream:true});});},"
       "on:function(a,h){if(!l.has(a))l.set(a,[]);l.get(a).push(h);},"
       "off:function(a,h){var hs=l.get(a);if(!hs)return;var i=hs.indexOf(h);if(i!==-1)hs.splice(i,1);}"
     "};"
+    "document.addEventListener('dragover',function(e){e.preventDefault();});"
+    "document.addEventListener('drop',function(e){"
+      "e.preventDefault();"
+      "var f=[];if(e.dataTransfer&&e.dataTransfer.files){"
+        "for(var i=0;i<e.dataTransfer.files.length;i++){"
+          "var x=e.dataTransfer.files[i];f.push({name:x.name,size:x.size,type:x.type,path:x.path||''});}}"
+      "if(f.length>0)send({id:String(n++),type:'event',action:'drop:files',data:f});"
+    "});"
     "})();";
 
 /* ---------- delegate ---------- */
@@ -156,9 +169,19 @@ static NSString *g_assetDir = nil;
     else if ([ext isEqualToString:@"ico"]) mime = @"image/x-icon";
     else if ([ext isEqualToString:@"webp"]) mime = @"image/webp";
 
+    NSMutableDictionary *headers = [NSMutableDictionary dictionaryWithDictionary:@{
+        @"Content-Type": mime,
+        @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length]
+    }];
+
+    const char *csp = getenv("BUTTER_CSP");
+    if (csp) {
+        headers[@"Content-Security-Policy"] = [NSString stringWithUTF8String:csp];
+    }
+
     NSHTTPURLResponse *response = [[NSHTTPURLResponse alloc]
         initWithURL:url statusCode:200 HTTPVersion:@"HTTP/1.1"
-        headerFields:@{@"Content-Type": mime, @"Content-Length": [NSString stringWithFormat:@"%lu", (unsigned long)data.length]}];
+        headerFields:headers];
 
     [urlSchemeTask didReceiveResponse:response];
     [urlSchemeTask didReceiveData:data];
@@ -173,12 +196,66 @@ static NSString *g_assetDir = nil;
 
 /* ---------- delegate ---------- */
 
+typedef struct {
+    char id[64];
+    NSUInteger modifierFlags;
+    unsigned short keyCode;
+} RegisteredShortcut;
+
+#define MAX_SHORTCUTS 64
+static RegisteredShortcut g_shortcuts[MAX_SHORTCUTS];
+static int g_shortcut_count = 0;
+static id g_globalMonitor = nil;
+
 @interface ButterDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate>
 @property (nonatomic, strong) WKWebView *webview;
 @property (nonatomic, strong) NSWindow *window;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, NSWindow *> *windows;
+@property (nonatomic, strong) NSMutableDictionary<NSString *, WKWebView *> *webviews;
+@property (nonatomic, strong) NSStatusItem *statusItem;
 @end
 
 @implementation ButterDelegate
+
+- (instancetype)init {
+    self = [super init];
+    if (self) {
+        _windows = [NSMutableDictionary dictionary];
+        _webviews = [NSMutableDictionary dictionary];
+
+        /* Register for sleep/wake notifications */
+        NSNotificationCenter *wsnc = [[NSWorkspace sharedWorkspace] notificationCenter];
+        [wsnc addObserver:self selector:@selector(systemWillSleep:)
+            name:NSWorkspaceWillSleepNotification object:nil];
+        [wsnc addObserver:self selector:@selector(systemDidWake:)
+            name:NSWorkspaceDidWakeNotification object:nil];
+        [wsnc addObserver:self selector:@selector(screensDidSleep:)
+            name:NSWorkspaceScreensDidSleepNotification object:nil];
+        [wsnc addObserver:self selector:@selector(screensDidWake:)
+            name:NSWorkspaceScreensDidWakeNotification object:nil];
+    }
+    return self;
+}
+
+- (void)systemWillSleep:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:sleep\"}";
+    ring_write_tb(json, strlen(json));
+}
+
+- (void)systemDidWake:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:wake\"}";
+    ring_write_tb(json, strlen(json));
+}
+
+- (void)screensDidSleep:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:screensleep\"}";
+    ring_write_tb(json, strlen(json));
+}
+
+- (void)screensDidWake:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:screenwake\"}";
+    ring_write_tb(json, strlen(json));
+}
 
 - (void)userContentController:(WKUserContentController *)uc didReceiveScriptMessage:(WKScriptMessage *)message {
     NSString *body = message.body;
@@ -194,6 +271,11 @@ static NSString *g_assetDir = nil;
     /* Intercept dialog requests from webview — handle natively without host round-trip */
     if (strstr(utf8, "\"dialog:open\"") || strstr(utf8, "\"dialog:save\"") || strstr(utf8, "\"dialog:folder\"")) {
         [self handleWebviewDialog:body];
+        return;
+    }
+
+    if (strstr(utf8, "\"dialog:message\"")) {
+        [self handleMessageDialog:body fromWebview:YES];
         return;
     }
 
@@ -417,6 +499,55 @@ static NSString *g_assetDir = nil;
     [self injectDialogResponse:response];
 }
 
+- (void)handleMessageDialog:(NSString *)jsonStr fromWebview:(BOOL)fromWebview {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSString *msgId = msg[@"id"] ?: @"0";
+    NSDictionary *opts = msg[@"data"] ?: @{};
+
+    NSString *title = opts[@"title"] ?: @"";
+    NSString *message = opts[@"message"] ?: @"";
+    NSString *detail = opts[@"detail"] ?: @"";
+    NSString *type = opts[@"type"] ?: @"info";
+    NSArray *buttons = opts[@"buttons"];
+
+    NSAlert *alert = [[NSAlert alloc] init];
+    [alert setMessageText:message];
+    if (detail.length > 0) [alert setInformativeText:detail];
+    if (title.length > 0) [alert.window setTitle:title];
+
+    if ([type isEqualToString:@"warning"]) {
+        [alert setAlertStyle:NSAlertStyleWarning];
+    } else if ([type isEqualToString:@"error"]) {
+        [alert setAlertStyle:NSAlertStyleCritical];
+    } else {
+        [alert setAlertStyle:NSAlertStyleInformational];
+    }
+
+    if (buttons && [buttons isKindOfClass:[NSArray class]]) {
+        for (NSString *btn in buttons) {
+            [alert addButtonWithTitle:btn];
+        }
+    } else {
+        [alert addButtonWithTitle:@"OK"];
+    }
+
+    NSModalResponse result = [alert runModal];
+    NSInteger buttonIndex = result - NSAlertFirstButtonReturn;
+
+    NSString *response = [NSString stringWithFormat:
+        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"dialog:message\",\"data\":{\"button\":%ld,\"cancelled\":false}}",
+        msgId, (long)buttonIndex];
+
+    if (fromWebview) {
+        [self injectDialogResponse:response];
+    } else {
+        ring_write_tb([response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+    }
+}
+
 - (void)showContextMenuFromJson:(NSString *)jsonStr {
     NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
     NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -612,6 +743,31 @@ static NSString *g_assetDir = nil;
     ring_write_tb(utf8, strlen(utf8));
 }
 
+/* ---------- deep linking ---------- */
+
+- (void)applicationWillFinishLaunching:(NSNotification *)notification {
+    [[NSAppleEventManager sharedAppleEventManager]
+        setEventHandler:self
+        andSelector:@selector(handleURLEvent:withReplyEvent:)
+        forEventClass:kInternetEventClass
+        andEventID:kAEGetURL];
+}
+
+- (void)handleURLEvent:(NSAppleEventDescriptor *)event withReplyEvent:(NSAppleEventDescriptor *)reply {
+    NSString *url = [[event paramDescriptorForKeyword:keyDirectObject] stringValue];
+    if (!url) return;
+
+    /* Escape the URL for JSON */
+    NSString *escaped = [url stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""];
+
+    char json[2048];
+    snprintf(json, sizeof(json),
+        "{\"id\":\"0\",\"type\":\"event\",\"action\":\"app:openurl\",\"data\":{\"url\":\"%s\"}}",
+        [escaped UTF8String]);
+    ring_write_tb(json, strlen(json));
+}
+
 - (void)windowWillClose:(NSNotification *)notification {
     const char *quit = "{\"id\":\"0\",\"type\":\"control\",\"action\":\"quit\"}";
     ring_write_tb(quit, strlen(quit));
@@ -661,6 +817,364 @@ static NSString *g_assetDir = nil;
     fprintf(stderr, "[shim] failed to load: %s\n", [[error localizedDescription] UTF8String]);
 }
 
+/* ---------- window management ---------- */
+
+- (void)handleWindowCreate:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSString *msgId = msg[@"id"] ?: @"0";
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *windowId = opts[@"windowId"] ?: @"0";
+    NSString *url = opts[@"url"] ?: @"butter://app/index.html";
+    NSString *title = opts[@"title"] ?: @"Butter";
+    NSNumber *width = opts[@"width"] ?: @800;
+    NSNumber *height = opts[@"height"] ?: @600;
+    NSNumber *xPos = opts[@"x"];
+    NSNumber *yPos = opts[@"y"];
+    NSNumber *frameless = opts[@"frameless"];
+    NSNumber *transparent = opts[@"transparent"];
+    NSNumber *alwaysOnTop = opts[@"alwaysOnTop"];
+    NSNumber *modal = opts[@"modal"];
+
+    NSWindowStyleMask style = NSWindowStyleMaskClosable | NSWindowStyleMaskResizable | NSWindowStyleMaskMiniaturizable;
+    if (![frameless boolValue]) {
+        style |= NSWindowStyleMaskTitled;
+    }
+
+    CGFloat x = xPos ? [xPos doubleValue] : 200;
+    CGFloat y = yPos ? [yPos doubleValue] : 200;
+
+    NSWindow *win = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(x, y, [width doubleValue], [height doubleValue])
+        styleMask:style
+        backing:NSBackingStoreBuffered
+        defer:NO];
+
+    [win setTitle:title];
+    [win setDelegate:self];
+
+    if ([transparent boolValue]) {
+        [win setOpaque:NO];
+        [win setBackgroundColor:[NSColor clearColor]];
+    }
+
+    if ([alwaysOnTop boolValue]) {
+        [win setLevel:NSFloatingWindowLevel];
+    }
+
+    /* Create webview config with scheme handler + bridge */
+    WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
+    ButterSchemeHandler *schemeHandler = [[ButterSchemeHandler alloc] init];
+    [config setURLSchemeHandler:schemeHandler forURLScheme:@"butter"];
+
+    WKUserContentController *ucc = config.userContentController;
+    [ucc addScriptMessageHandler:self name:@"butter"];
+
+    WKUserScript *bridgeScript = [[WKUserScript alloc]
+        initWithSource:BRIDGE_JS
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+        forMainFrameOnly:YES];
+    [ucc addUserScript:bridgeScript];
+
+    WKWebView *webview = [[WKWebView alloc] initWithFrame:win.contentView.bounds configuration:config];
+    webview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+
+    if ([transparent boolValue]) {
+        [webview setValue:@NO forKey:@"drawsBackground"];
+    }
+
+    [win.contentView addSubview:webview];
+    webview.navigationDelegate = self;
+
+    /* Load URL */
+    NSURL *appURL = [NSURL URLWithString:url];
+    [webview loadRequest:[NSURLRequest requestWithURL:appURL]];
+
+    /* Track */
+    self.windows[windowId] = win;
+    self.webviews[windowId] = webview;
+
+    /* Show */
+    if ([modal boolValue] && self.window) {
+        [self.window beginSheet:win completionHandler:^(NSModalResponse resp) {
+            [self.windows removeObjectForKey:windowId];
+            [self.webviews removeObjectForKey:windowId];
+            char json[256];
+            snprintf(json, sizeof(json),
+                "{\"id\":\"0\",\"type\":\"event\",\"action\":\"window:closed\",\"data\":{\"windowId\":\"%s\"}}",
+                [windowId UTF8String]);
+            ring_write_tb(json, strlen(json));
+        }];
+    } else {
+        [win makeKeyAndOrderFront:nil];
+    }
+
+    /* Send response */
+    NSString *response = [NSString stringWithFormat:
+        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"window:create\",\"data\":{\"windowId\":\"%@\"}}",
+        msgId, windowId];
+    ring_write_tb([response UTF8String], [response lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+}
+
+- (void)handleWindowSet:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *windowId = opts[@"windowId"];
+    NSWindow *win = windowId ? self.windows[windowId] : self.window;
+    if (!win) win = self.window;
+
+    NSString *title = opts[@"title"];
+    if (title) [win setTitle:title];
+
+    NSNumber *width = opts[@"width"];
+    NSNumber *height = opts[@"height"];
+    if (width || height) {
+        NSRect frame = [win frame];
+        NSRect content = [win contentRectForFrameRect:frame];
+        if (width) content.size.width = [width doubleValue];
+        if (height) content.size.height = [height doubleValue];
+        NSRect newFrame = [win frameRectForContentRect:content];
+        [win setFrame:newFrame display:YES animate:YES];
+    }
+
+    NSNumber *x = opts[@"x"];
+    NSNumber *y = opts[@"y"];
+    if (x || y) {
+        NSRect frame = [win frame];
+        if (x) frame.origin.x = [x doubleValue];
+        if (y) frame.origin.y = [y doubleValue];
+        [win setFrameOrigin:frame.origin];
+    }
+
+    NSNumber *resizable = opts[@"resizable"];
+    if (resizable) {
+        if ([resizable boolValue]) {
+            [win setStyleMask:[win styleMask] | NSWindowStyleMaskResizable];
+        } else {
+            [win setStyleMask:[win styleMask] & ~NSWindowStyleMaskResizable];
+        }
+    }
+
+    NSNumber *minWidth = opts[@"minWidth"];
+    NSNumber *minHeight = opts[@"minHeight"];
+    if (minWidth || minHeight) {
+        NSSize minSize = [win minSize];
+        if (minWidth) minSize.width = [minWidth doubleValue];
+        if (minHeight) minSize.height = [minHeight doubleValue];
+        [win setMinSize:minSize];
+    }
+}
+
+- (void)handleWindowFullscreen:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSNumber *enable = opts[@"enable"];
+    BOOL isFS = (self.window.styleMask & NSWindowStyleMaskFullScreen) != 0;
+
+    if (enable && [enable boolValue] != isFS) {
+        [self.window toggleFullScreen:nil];
+    }
+}
+
+- (void)handleWindowAlwaysOnTop:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSNumber *enable = opts[@"enable"];
+    if (enable) {
+        [self.window setLevel:[enable boolValue] ? NSFloatingWindowLevel : NSNormalWindowLevel];
+    }
+}
+
+/* ---------- system tray ---------- */
+
+- (void)handleTraySet:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *title = opts[@"title"];
+    NSString *tooltip = opts[@"tooltip"];
+    NSArray *items = opts[@"items"];
+
+    if (!self.statusItem) {
+        self.statusItem = [[NSStatusBar systemStatusBar] statusItemWithLength:NSVariableStatusItemLength];
+    }
+
+    if (title) {
+        self.statusItem.button.title = title;
+    }
+
+    if (tooltip) {
+        self.statusItem.button.toolTip = tooltip;
+    }
+
+    if (items && [items isKindOfClass:[NSArray class]]) {
+        NSMenu *menu = [[NSMenu alloc] init];
+        for (NSDictionary *item in items) {
+            if ([item[@"separator"] boolValue]) {
+                [menu addItem:[NSMenuItem separatorItem]];
+                continue;
+            }
+            NSString *label = item[@"label"] ?: @"";
+            NSString *action = item[@"action"];
+
+            NSMenuItem *mi = [[NSMenuItem alloc] initWithTitle:label action:@selector(handleTrayAction:) keyEquivalent:@""];
+            [mi setTarget:self];
+            if (action) [mi setRepresentedObject:action];
+            [menu addItem:mi];
+        }
+        self.statusItem.menu = menu;
+    }
+}
+
+- (void)handleTrayAction:(NSMenuItem *)sender {
+    NSString *action = [sender representedObject];
+    if (!action) return;
+    NSString *json = [NSString stringWithFormat:@"{\"id\":\"0\",\"type\":\"event\",\"action\":\"tray:action\",\"data\":{\"action\":\"%@\"}}", action];
+    const char *utf8 = [json UTF8String];
+    ring_write_tb(utf8, strlen(utf8));
+}
+
+- (void)handleTrayRemove {
+    if (self.statusItem) {
+        [[NSStatusBar systemStatusBar] removeStatusItem:self.statusItem];
+        self.statusItem = nil;
+    }
+}
+
+/* ---------- global shortcuts ---------- */
+
+static unsigned short keyCodeForString(NSString *key) {
+    /* Common key mappings (macOS virtual key codes) */
+    NSDictionary *map = @{
+        @"a": @(0), @"s": @(1), @"d": @(2), @"f": @(3), @"h": @(4), @"g": @(5),
+        @"z": @(6), @"x": @(7), @"c": @(8), @"v": @(9), @"b": @(11), @"q": @(12),
+        @"w": @(13), @"e": @(14), @"r": @(15), @"y": @(16), @"t": @(17), @"1": @(18),
+        @"2": @(19), @"3": @(20), @"4": @(21), @"6": @(22), @"5": @(23), @"=": @(24),
+        @"9": @(25), @"7": @(26), @"-": @(27), @"8": @(28), @"0": @(29), @"]": @(30),
+        @"o": @(31), @"u": @(32), @"[": @(33), @"i": @(34), @"p": @(35), @"l": @(37),
+        @"j": @(38), @"'": @(39), @"k": @(40), @";": @(41), @"\\": @(42), @",": @(43),
+        @"/": @(44), @"n": @(45), @"m": @(46), @".": @(47), @" ": @(49), @"space": @(49),
+        @"return": @(36), @"enter": @(36), @"tab": @(48), @"escape": @(53), @"esc": @(53),
+        @"delete": @(51), @"backspace": @(51),
+        @"f1": @(122), @"f2": @(120), @"f3": @(99), @"f4": @(118), @"f5": @(96),
+        @"f6": @(97), @"f7": @(98), @"f8": @(100), @"f9": @(101), @"f10": @(109),
+        @"f11": @(103), @"f12": @(111),
+        @"up": @(126), @"down": @(125), @"left": @(123), @"right": @(124),
+    };
+    NSNumber *code = map[[key lowercaseString]];
+    return code ? [code unsignedShortValue] : USHRT_MAX;
+}
+
+- (void)handleShortcutRegister:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *shortcutId = opts[@"id"];
+    NSDictionary *shortcut = opts[@"shortcut"];
+    if (!shortcutId || !shortcut) return;
+
+    NSString *key = shortcut[@"key"];
+    NSArray *modifiers = shortcut[@"modifiers"];
+
+    unsigned short keyCode = keyCodeForString(key);
+    if (keyCode == USHRT_MAX) return;
+
+    NSUInteger modFlags = 0;
+    for (NSString *mod in modifiers) {
+        if ([mod isEqualToString:@"cmd"]) modFlags |= NSEventModifierFlagCommand;
+        else if ([mod isEqualToString:@"ctrl"]) modFlags |= NSEventModifierFlagControl;
+        else if ([mod isEqualToString:@"alt"]) modFlags |= NSEventModifierFlagOption;
+        else if ([mod isEqualToString:@"shift"]) modFlags |= NSEventModifierFlagShift;
+    }
+
+    if (g_shortcut_count < MAX_SHORTCUTS) {
+        RegisteredShortcut *s = &g_shortcuts[g_shortcut_count++];
+        strncpy(s->id, [shortcutId UTF8String], sizeof(s->id) - 1);
+        s->id[sizeof(s->id) - 1] = '\0';
+        s->modifierFlags = modFlags;
+        s->keyCode = keyCode;
+    }
+
+    /* Install global monitor if not already */
+    if (!g_globalMonitor && g_shortcut_count > 0) {
+        g_globalMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+            handler:^(NSEvent *event) {
+                NSUInteger flags = [event modifierFlags] & NSEventModifierFlagDeviceIndependentFlagsMask;
+                unsigned short kc = [event keyCode];
+                for (int i = 0; i < g_shortcut_count; i++) {
+                    if (g_shortcuts[i].keyCode == kc && (flags & g_shortcuts[i].modifierFlags) == g_shortcuts[i].modifierFlags) {
+                        char json[256];
+                        snprintf(json, sizeof(json),
+                            "{\"id\":\"0\",\"type\":\"event\",\"action\":\"shortcut:triggered\",\"data\":{\"id\":\"%s\"}}",
+                            g_shortcuts[i].id);
+                        ring_write_tb(json, strlen(json));
+                    }
+                }
+            }];
+    }
+}
+
+- (void)handleShortcutUnregister:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *shortcutId = opts[@"id"];
+    if (!shortcutId) return;
+
+    const char *idStr = [shortcutId UTF8String];
+    for (int i = 0; i < g_shortcut_count; i++) {
+        if (strcmp(g_shortcuts[i].id, idStr) == 0) {
+            memmove(&g_shortcuts[i], &g_shortcuts[i+1], (g_shortcut_count - i - 1) * sizeof(RegisteredShortcut));
+            g_shortcut_count--;
+            break;
+        }
+    }
+
+    /* Remove monitor if no shortcuts left */
+    if (g_shortcut_count == 0 && g_globalMonitor) {
+        [NSEvent removeMonitor:g_globalMonitor];
+        g_globalMonitor = nil;
+    }
+}
+
+- (void)handleWindowClose:(NSString *)jsonStr {
+    NSData *data = [jsonStr dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *msg = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+    if (!msg) return;
+
+    NSDictionary *opts = msg[@"data"] ?: @{};
+    NSString *windowId = opts[@"windowId"];
+
+    if (windowId && self.windows[windowId]) {
+        NSWindow *win = self.windows[windowId];
+        /* If shown as sheet, end it */
+        if ([win isSheet]) {
+            [self.window endSheet:win];
+        } else {
+            [win close];
+        }
+        [self.windows removeObjectForKey:windowId];
+        [self.webviews removeObjectForKey:windowId];
+    }
+}
+
 - (void)pollTimer:(NSTimer *)timer {
     char *msg;
     while ((msg = ring_read_ts()) != NULL) {
@@ -678,6 +1192,227 @@ static NSString *g_assetDir = nil;
             }
             if (strstr(msg, "\"dialog:open\"") || strstr(msg, "\"dialog:save\"") || strstr(msg, "\"dialog:folder\"")) {
                 [self handleDialogControl:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"dialog:message\"")) {
+                [self handleMessageDialog:json fromWebview:NO];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"screen:list\"")) {
+                NSMutableArray *screens = [NSMutableArray array];
+                for (NSScreen *screen in [NSScreen screens]) {
+                    NSRect frame = [screen frame];
+                    NSRect visible = [screen visibleFrame];
+                    CGFloat scale = [screen backingScaleFactor];
+                    [screens addObject:@{
+                        @"x": @(frame.origin.x),
+                        @"y": @(frame.origin.y),
+                        @"width": @(frame.size.width),
+                        @"height": @(frame.size.height),
+                        @"visibleX": @(visible.origin.x),
+                        @"visibleY": @(visible.origin.y),
+                        @"visibleWidth": @(visible.size.width),
+                        @"visibleHeight": @(visible.size.height),
+                        @"scaleFactor": @(scale),
+                        @"isPrimary": @(screen == [NSScreen screens].firstObject),
+                    }];
+                }
+                NSData *jsonData = [NSJSONSerialization dataWithJSONObject:screens options:0 error:nil];
+                NSString *screensJson = [[NSString alloc] initWithData:jsonData encoding:NSUTF8StringEncoding];
+                NSString *msgId2 = @"0";
+                NSData *d2 = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *p2 = [NSJSONSerialization JSONObjectWithData:d2 options:0 error:nil];
+                if (p2[@"id"]) msgId2 = p2[@"id"];
+                NSString *resp = [NSString stringWithFormat:
+                    @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"screen:list\",\"data\":%@}",
+                    msgId2, screensJson];
+                ring_write_tb([resp UTF8String], [resp lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:ready\"")) {
+                /* Swap from splash to main app */
+                if (self.webview) {
+                    NSURL *appURL = [NSURL URLWithString:@"butter://app/index.html"];
+                    [self.webview loadRequest:[NSURLRequest requestWithURL:appURL]];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:screenshot\"")) {
+                NSString *msgId = @"0";
+                NSData *data2 = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data2 options:0 error:nil];
+                if (parsed[@"id"]) msgId = parsed[@"id"];
+                NSDictionary *sOpts = parsed[@"data"] ?: @{};
+                NSString *savePath = sOpts[@"path"];
+
+                if (self.webview && savePath) {
+                    WKSnapshotConfiguration *snapCfg = [[WKSnapshotConfiguration alloc] init];
+                    [self.webview takeSnapshotWithConfiguration:snapCfg completionHandler:^(NSImage *image, NSError *err) {
+                        if (err || !image) {
+                            char resp[256];
+                            snprintf(resp, sizeof(resp),
+                                "{\"id\":\"%s\",\"type\":\"response\",\"action\":\"window:screenshot\",\"data\":{\"ok\":false}}",
+                                [msgId UTF8String]);
+                            ring_write_tb(resp, strlen(resp));
+                            return;
+                        }
+                        NSBitmapImageRep *rep = [[NSBitmapImageRep alloc] initWithData:[image TIFFRepresentation]];
+                        NSData *pngData = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+                        [pngData writeToFile:savePath atomically:YES];
+
+                        char resp[512];
+                        snprintf(resp, sizeof(resp),
+                            "{\"id\":\"%s\",\"type\":\"response\",\"action\":\"window:screenshot\",\"data\":{\"ok\":true,\"path\":\"%s\"}}",
+                            [msgId UTF8String], [savePath UTF8String]);
+                        ring_write_tb(resp, strlen(resp));
+                    }];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:print\"")) {
+                if (self.webview) {
+                    NSPrintInfo *printInfo = [NSPrintInfo sharedPrintInfo];
+                    NSPrintOperation *op = [self.webview printOperationWithPrintInfo:printInfo];
+                    [op setShowsPrintPanel:YES];
+                    [op setShowsProgressPanel:YES];
+                    [op runOperationModalForWindow:self.window delegate:nil didRunSelector:nil contextInfo:nil];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"tray:set\"")) {
+                [self handleTraySet:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"tray:remove\"")) {
+                [self handleTrayRemove];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"shortcut:register\"")) {
+                [self handleShortcutRegister:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"shortcut:unregister\"")) {
+                [self handleShortcutUnregister:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"menu:set\"")) {
+                /* Rebuild the menu bar from new JSON */
+                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                NSDictionary *menuData = parsed[@"data"];
+                if (menuData) {
+                    NSData *menuJson = [NSJSONSerialization dataWithJSONObject:menuData options:0 error:nil];
+                    NSString *menuStr = [[NSString alloc] initWithData:menuJson encoding:NSUTF8StringEncoding];
+                    const char *title = [self.window.title UTF8String] ?: "Butter App";
+                    buildMenuBar(title, [menuStr UTF8String], self);
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:create\"")) {
+                [self handleWindowCreate:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:set\"")) {
+                [self handleWindowSet:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:maximize\"")) {
+                [self.window zoom:nil];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:minimize\"")) {
+                [self.window miniaturize:nil];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:restore\"")) {
+                [self.window deminiaturize:nil];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:fullscreen\"")) {
+                [self handleWindowFullscreen:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:alwaysontop\"")) {
+                [self handleWindowAlwaysOnTop:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"window:close\"")) {
+                [self handleWindowClose:json];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"nav:back\"")) {
+                if (self.webview && [self.webview canGoBack]) {
+                    [self.webview goBack];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"nav:forward\"")) {
+                if (self.webview && [self.webview canGoForward]) {
+                    [self.webview goForward];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"nav:reload\"")) {
+                if (self.webview) {
+                    [self.webview reload];
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"nav:loadurl\"")) {
+                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                NSDictionary *navData = parsed[@"data"];
+                NSString *urlStr = navData[@"url"];
+                if (self.webview && urlStr) {
+                    NSURL *url = [NSURL URLWithString:urlStr];
+                    if (url) {
+                        [self.webview loadRequest:[NSURLRequest requestWithURL:url]];
+                    }
+                }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"dock:setbadge\"")) {
+                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                NSDictionary *dockData = parsed[@"data"];
+                NSString *text = dockData[@"text"];
+                [[NSApp dockTile] setBadgeLabel:text ?: @""];
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"dock:bounce\"")) {
+                NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+                NSDictionary *dockData = parsed[@"data"];
+                NSString *type = dockData[@"type"];
+                NSRequestUserAttentionType attentionType = NSInformationalRequest;
+                if ([type isEqualToString:@"critical"]) {
+                    attentionType = NSCriticalRequest;
+                }
+                [NSApp requestUserAttention:attentionType];
                 free(msg);
                 continue;
             }
@@ -928,10 +1663,17 @@ int main(int argc, char **argv) {
             [webview.configuration.preferences setValue:@YES forKey:@"developerExtrasEnabled"];
         }
 
-        /* Load HTML via custom protocol (avoids file:// CORS issues) */
+        /* Load splash screen if provided, otherwise main app */
         g_assetDir = [[NSString stringWithUTF8String:html_path] stringByDeletingLastPathComponent];
-        NSURL *appURL = [NSURL URLWithString:@"butter://app/index.html"];
-        [webview loadRequest:[NSURLRequest requestWithURL:appURL]];
+        const char *splashPath = getenv("BUTTER_SPLASH");
+        if (splashPath) {
+            NSURL *splashURL = [NSURL fileURLWithPath:[NSString stringWithUTF8String:splashPath]];
+            [webview loadRequest:[NSURLRequest requestWithURL:splashURL]];
+            /* The host sends a "window:ready" control after loading, which triggers the swap */
+        } else {
+            NSURL *appURL = [NSURL URLWithString:@"butter://app/index.html"];
+            [webview loadRequest:[NSURLRequest requestWithURL:appURL]];
+        }
 
         /* Poll timer (~60fps) */
         [NSTimer scheduledTimerWithTimeInterval:1.0/60.0

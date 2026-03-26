@@ -68,6 +68,19 @@ export type FolderDialogResult = {
   cancelled: boolean
 }
 
+export type MessageDialogOptions = {
+  title?: string
+  message: string
+  detail?: string
+  type?: "info" | "warning" | "error"
+  buttons?: string[]
+}
+
+export type MessageDialogResult = {
+  button: number
+  cancelled: boolean
+}
+
 const isWebview = (): boolean =>
   typeof globalThis.__butterRuntime === "undefined" &&
   typeof (globalThis as any).butter?.invoke === "function"
@@ -153,5 +166,40 @@ export const dialog = {
       paths: Array.isArray(raw?.paths) ? raw.paths : [],
       cancelled: normalizeBool(raw?.cancelled) || !(raw?.paths?.length),
     }
+  },
+
+  /**
+   * Show a message dialog (alert/confirm).
+   *
+   * @example
+   * const result = await dialog.message({
+   *   title: "Confirm",
+   *   message: "Are you sure?",
+   *   type: "warning",
+   *   buttons: ["Cancel", "OK"],
+   * })
+   * if (result.button === 1) { ... }
+   */
+  message: async (opts: MessageDialogOptions): Promise<MessageDialogResult> => {
+    const raw = await invoke("dialog:message", opts) as any
+    return {
+      button: typeof raw?.button === "number" ? raw.button : 0,
+      cancelled: normalizeBool(raw?.cancelled),
+    }
+  },
+
+  /**
+   * Show a simple alert dialog.
+   */
+  alert: async (message: string, title = "Alert"): Promise<void> => {
+    await invoke("dialog:message", { title, message, type: "info", buttons: ["OK"] })
+  },
+
+  /**
+   * Show a confirm dialog. Returns true if confirmed.
+   */
+  confirm: async (message: string, title = "Confirm"): Promise<boolean> => {
+    const raw = await invoke("dialog:message", { title, message, type: "info", buttons: ["Cancel", "OK"] }) as any
+    return raw?.button === 1
   },
 }

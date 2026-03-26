@@ -7,6 +7,12 @@ export type CreateWindowOptions = {
   title?: string
   width?: number
   height?: number
+  x?: number
+  y?: number
+  frameless?: boolean
+  transparent?: boolean
+  alwaysOnTop?: boolean
+  modal?: boolean
 }
 
 type Runtime = {
@@ -64,9 +70,6 @@ export const createRuntime = (
 
     drainOutgoing: () => outgoing.splice(0),
 
-    // Queues a window:create control message to the shim.
-    // TODO(darwin.m): shim-side window:create support must be implemented to
-    // actually open a new NSWindow + WKWebView for each unique window ID.
     createWindow: (opts) => {
       const windowId = String(nextWindowId++)
       outgoing.push({
@@ -123,6 +126,20 @@ const getRuntime = (): Runtime => {
 export const on = (action: string, handler: Handler) => getRuntime().on(action, handler)
 export const send = (action: string, data?: unknown) => getRuntime().send(action, data)
 export const getWindow = () => getRuntime().getWindow()
-export const setWindow = (opts: Partial<WindowOptions>) => getRuntime().setWindow(opts)
+export const setWindow = (opts: Partial<WindowOptions>) => {
+  getRuntime().setWindow(opts)
+  return getRuntime().control("window:set", opts)
+}
 export const createWindow = (opts: CreateWindowOptions) => getRuntime().createWindow(opts)
 export const sendChunk = (requestId: string, data: unknown) => getRuntime().sendChunk(requestId, data)
+export const maximize = () => getRuntime().control("window:maximize")
+export const minimize = () => getRuntime().control("window:minimize")
+export const restore = () => getRuntime().control("window:restore")
+export const fullscreen = (enable: boolean) => getRuntime().control("window:fullscreen", { enable })
+export const setAlwaysOnTop = (enable: boolean) => getRuntime().control("window:alwaysontop", { enable })
+export const closeWindow = (windowId?: string) => getRuntime().control("window:close", { windowId })
+export const setMenu = (menu: unknown) => getRuntime().control("menu:set", menu)
+export const print = () => getRuntime().control("window:print")
+export const screenshot = (path: string) => getRuntime().control("window:screenshot", { path })
+export const ready = () => getRuntime().control("window:ready")
+export const listScreens = () => getRuntime().control("screen:list")

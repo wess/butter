@@ -129,16 +129,37 @@ butter.on("document:saved", ({ path }) => {
 
 Some action names have special meaning and map to native OS behavior without any handler on your part:
 
-| Action  | Behavior                                      |
-|---------|-----------------------------------------------|
-| `quit`  | Closes the window and exits the app           |
-| `undo`  | Native undo (text fields, webview edit state) |
-| `redo`  | Native redo                                   |
-| `cut`   | Native cut                                    |
-| `copy`  | Native copy                                   |
-| `paste` | Native paste                                  |
+| Action            | Behavior                                      |
+|-------------------|-----------------------------------------------|
+| `app:quit`        | Closes the window and exits the app           |
+| `edit:undo`       | Native undo (text fields, webview edit state) |
+| `edit:redo`       | Native redo                                   |
+| `edit:cut`        | Native cut                                    |
+| `edit:copy`       | Native copy                                   |
+| `edit:paste`      | Native paste                                  |
+| `edit:selectall`  | Native select all                             |
 
-You can still add your own `on("undo", ...)` handler if you want to intercept the action in host code.
+These actions map directly to native OS selectors (e.g. `edit:copy` triggers the system copy on macOS). You can still add your own `on("edit:undo", ...)` handler if you want to intercept the action in host code.
+
+## Dynamic Menu Updates
+
+You can update the menu bar at runtime from your host code:
+
+```ts
+import { setMenu } from "butter"
+
+// Pass a Menu array to rebuild the menu bar
+setMenu([
+  {
+    label: "File",
+    items: [
+      { label: "Close", action: "file:close", shortcut: "CmdOrCtrl+W" },
+    ],
+  },
+])
+```
+
+This sends a `menu:set` control message to the native shim, which rebuilds the menu bar immediately.
 
 ## macOS App Menu
 
