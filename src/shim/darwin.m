@@ -46,6 +46,8 @@ static void write_u32(uint8_t *p, uint32_t v) {
 
 /* ---------- ring buffer write (to-bun) ---------- */
 
+static void buildMenuBar(const char *title, const char *menuJson, id delegate);
+
 static void ring_write_tb(const char *json, size_t len) {
     uint32_t total = MSG_HDR + (uint32_t)len;
     uint32_t wcur = read_u32(g_shm + TB_WCUR);
