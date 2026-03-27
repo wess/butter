@@ -16,7 +16,7 @@ jobs:
       changed: ${{ steps.diff.outputs.changed }}
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 2
 
@@ -40,7 +40,7 @@ jobs:
     needs: check-version
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
 
       - run: bun install
@@ -91,7 +91,7 @@ jobs:
         run: echo "sha256=$(sha256sum /tmp/butter.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: wess/homebrew-packages
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
