@@ -68,6 +68,64 @@ jobs:
           generate_release_notes: true
           draft: false
 
+  build-binaries:
+    runs-on: macos-latest
+    needs: [check-version, publish]
+    if: needs.check-version.outputs.changed == 'true'
+    strategy:
+      matrix:
+        include:
+          - target: bun-darwin-arm64
+            name: butter-darwin-arm64
+            archive: tar.gz
+          - target: bun-darwin-x64
+            name: butter-darwin-x64
+            archive: tar.gz
+          - target: bun-linux-x64
+            name: butter-linux-x64
+            archive: tar.gz
+          - target: bun-linux-arm64
+            name: butter-linux-arm64
+            archive: tar.gz
+          - target: bun-windows-x64
+            name: butter-windows-x64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: "v${{ needs.check-version.outputs.version }}"
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install
+
+      - name: Compile binary
+        run: |
+          mkdir -p dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            bun build --compile --target=${{ matrix.target }} src/cli/index.ts --outfile dist/butter.exe
+          else
+            bun build --compile --target=${{ matrix.target }} src/cli/index.ts --outfile dist/butter
+          fi
+
+      - name: Package archive
+        run: |
+          cd dist
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            zip ../${{ matrix.name }}.zip butter.exe
+          else
+            tar czf ../${{ matrix.name }}.tar.gz butter
+          fi
+
+      - name: Upload to release
+        run: |
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            gh release upload "v${{ needs.check-version.outputs.version }}" ${{ matrix.name }}.zip --clobber
+          else
+            gh release upload "v${{ needs.check-version.outputs.version }}" ${{ matrix.name }}.tar.gz --clobber
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   update-homebrew:
     runs-on: ubuntu-latest
     needs: [check-version, publish]
