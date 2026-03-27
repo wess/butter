@@ -14,6 +14,7 @@ export const parseConfig = (yaml: string): Config => {
       title: raw.window?.title ?? defaults.window.title,
       width: raw.window?.width ?? defaults.window.width,
       height: raw.window?.height ?? defaults.window.height,
+      icon: raw.window?.icon ?? undefined,
     },
     build: {
       entry: raw.build?.entry ?? defaults.build.entry,

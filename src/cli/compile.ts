@@ -50,32 +50,16 @@ export const runCompile = async (projectDir: string, args: string[] = []): Promi
 
   // 2. Bundle app assets
   const buildDir = join(projectDir, ".butter", "build")
+  await Bun.$`rm -rf ${buildDir}`
   console.log("  Bundling app assets...")
   await Bun.build({
     entrypoints: [join(projectDir, config.build.entry)],
     outdir: buildDir,
     minify: true,
+    splitting: false,
   })
 
-  // Inline JS/CSS into HTML — external module scripts fail on file:// in WKWebView
-  const builtHtml = join(buildDir, "index.html")
-  let htmlContent = await Bun.file(builtHtml).text()
-
-  for (const match of htmlContent.matchAll(/<script[^>]*\ssrc="\.\/([^"]+)"[^>]*><\/script>/g)) {
-    const [tag, filename] = match
-    const jsFile = Bun.file(join(buildDir, filename))
-    if (await jsFile.exists()) {
-      htmlContent = htmlContent.replace(tag, `<script type="module">\n${await jsFile.text()}\n</script>`)
-    }
-  }
-  for (const match of htmlContent.matchAll(/<link[^>]*\shref="\.\/([^"]+)"[^>]*>/g)) {
-    const [tag, filename] = match
-    const cssFile = Bun.file(join(buildDir, filename))
-    if (await cssFile.exists()) {
-      htmlContent = htmlContent.replace(tag, `<style>\n${await cssFile.text()}\n</style>`)
-    }
-  }
-  await Bun.write(builtHtml, htmlContent)
+  // Assets are served via butter:// custom scheme handler, no inlining needed
 
   // 3. Read shim binary + semhelper as base64
   const shimB64 = Buffer.from(await Bun.file(binary).arrayBuffer()).toString("base64")

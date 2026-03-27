@@ -1,0 +1,7 @@
+{
+  "tool_name": "Bash",
+  "tool_input_preview": "{\"command\":\"bun test 2>&1\",\"timeout\":60000,\"description\":\"Run tests\"}",
+  "error": "Exit code 133\nbun test v1.3.11 (af24e281)\n[2026-03-27T20:02:09.598Z] [INFO] test message\n[CRASH] webview: test crash\n============================================================\nBun v1.3.11 (af24e281) macOS Silicon\nmacOS v26.3.1\nCPU: fp aes crc32 atomics\nArgs: \"/Users/wess/.asdf/installs/bun/1.3.11/bin/bun\" \"test\"\nFeatures: Bun.stderr(2) Bun.stdout(2) jsc spawn(3) tsconfig \nBuiltins: \"bun:ffi\" \"bun:test\" \"node:child_process\" \"node:fs\" \"node:os\" \"node:path\" \nElapsed: 289ms | User: 70ms | Sys: 75m...",
+  "timestamp": "2026-03-27T20:02:10.003Z",
+  "retry_count": 1
+}
