@@ -25,7 +25,7 @@ export const checkCompiler = async (): Promise<CheckResult> => {
       return { name: "Compiler", ok: true, detail: `clang ${match?.[1] ?? "unknown"}` }
     }
     if (platform === "linux") {
-      const result = await $`tcc -v 2>&1`.text()
+      const result = await $`cc -v 2>&1`.text()
       return { name: "Compiler", ok: true, detail: result.trim() }
     }
     if (platform === "win32") {
@@ -44,7 +44,7 @@ export const checkCompiler = async (): Promise<CheckResult> => {
     const fix = platform === "darwin"
       ? "Install Xcode Command Line Tools: xcode-select --install"
       : platform === "linux"
-        ? "Install TinyCC: sudo apt install tcc"
+        ? "Install a C compiler (gcc, clang, or tcc)"
         : "Install MSVC (Visual Studio Build Tools) or MinGW-GCC"
     return { name: "Compiler", ok: false, detail: "Not found", fix }
   }

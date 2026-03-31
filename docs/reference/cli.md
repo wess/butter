@@ -157,7 +157,7 @@ None.
 | Check | macOS | Linux | Windows |
 |---|---|---|---|
 | Bun | `Bun.version` | `Bun.version` | `Bun.version` |
-| Compiler | `clang --version` | `tcc -v` | `cl` or `gcc --version` |
+| Compiler | `clang --version` | `cc -v` | `cl` or `gcc --version` |
 | WebView | WKWebView (always available) | `pkg-config --exists webkit2gtk-4.1` | WebView2 (registry check) |
 
 **Output**
@@ -170,7 +170,7 @@ Each check prints a status line. If any check fails, a remediation hint is print
 |---|---|
 | Bun not found | `curl -fsSL https://bun.sh/install \| bash` |
 | clang not found (macOS) | `xcode-select --install` |
-| tcc not found (Linux) | `sudo apt install tcc` |
+| C compiler not found (Linux) | Install a C compiler (gcc, clang, or tcc) |
 | WebKitGTK missing (Linux) | `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev` |
 | Compiler not found (Windows) | Install Visual Studio Build Tools (MSVC) or MinGW-GCC |
 | WebView2 missing (Windows) | Install from https://developer.microsoft.com/en-us/microsoft-edge/webview2/ |

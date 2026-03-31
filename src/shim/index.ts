@@ -49,7 +49,7 @@ export const compileShim = async (projectDir: string): Promise<string> => {
   } else if (process.platform === "linux") {
     const cflags = await $`pkg-config --cflags gtk+-3.0 webkit2gtk-4.1`.text()
     const libs = await $`pkg-config --libs gtk+-3.0 webkit2gtk-4.1`.text()
-    await $`tcc -o ${output} ${source} ${cflags.trim().split(" ")} ${libs.trim().split(" ")}`
+    await $`cc -o ${output} ${source} ${cflags.trim().split(" ")} ${libs.trim().split(" ")}`
   } else if (process.platform === "win32") {
     try {
       await $`cl.exe /Fe:${output} ${source} /link ole32.lib user32.lib gdi32.lib shell32.lib shcore.lib advapi32.lib WebView2Loader.lib`

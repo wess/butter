@@ -1,6 +1,6 @@
 {
   "name": "butterframework",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "type": "module",
   "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
   "license": "MIT",

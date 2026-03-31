@@ -28,7 +28,8 @@ Butter is a minimal desktop application framework for macOS and Linux. It pairs 
 | Platform | WebView | Compiler |
 |---|---|---|
 | macOS (arm64 / x86_64) | WKWebView | clang (Xcode Command Line Tools) |
-| Linux | WebKitGTK 4.1 | tcc (TinyCC) |
+| Linux | WebKitGTK 4.1 | cc (gcc, clang, or tcc) |
+| Windows | WebView2 | MSVC (cl.exe) or MinGW (gcc) |
 
 ## Project Layout
 
