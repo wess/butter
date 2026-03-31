@@ -263,6 +263,12 @@ static void handle_context_menu(const char *msg) {
     gtk_menu_popup_at_pointer(GTK_MENU(menu), NULL);
 }
 
+/* ---------- forward declarations ---------- */
+
+static void handle_file_dialog_open(const char *msg, int from_webview);
+static void handle_file_dialog_save(const char *msg, int from_webview);
+static void handle_file_dialog_folder(const char *msg, int from_webview);
+
 /* ---------- script message handler ---------- */
 
 static void on_script_message(WebKitUserContentManager *manager,
