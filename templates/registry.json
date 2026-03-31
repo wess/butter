@@ -1,0 +1,44 @@
+{
+  "vanilla": [
+    "butter.yaml",
+    "package.json.tmpl",
+    "src/app/index.html",
+    "src/app/main.ts",
+    "src/app/styles.css",
+    "src/env.d.ts",
+    "src/host/index.ts",
+    "src/host/menu.ts"
+  ],
+  "react": [
+    "butter.yaml",
+    "package.json.tmpl",
+    "src/app/index.html",
+    "src/app/main.tsx",
+    "src/app/styles.css",
+    "src/env.d.ts",
+    "src/host/index.ts",
+    "src/host/menu.ts"
+  ],
+  "svelte": [
+    "butter.yaml",
+    "package.json.tmpl",
+    "src/app/app.svelte",
+    "src/app/index.html",
+    "src/app/main.ts",
+    "src/app/styles.css",
+    "src/env.d.ts",
+    "src/host/index.ts",
+    "src/host/menu.ts"
+  ],
+  "vue": [
+    "butter.yaml",
+    "package.json.tmpl",
+    "src/app/app.vue",
+    "src/app/index.html",
+    "src/app/main.ts",
+    "src/app/styles.css",
+    "src/env.d.ts",
+    "src/host/index.ts",
+    "src/host/menu.ts"
+  ]
+}

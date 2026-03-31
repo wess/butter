@@ -1,50 +1,16 @@
 import { resolve, join, dirname, basename } from "path"
 
-const TEMPLATES_DIR = join(dirname(import.meta.path), "..", "templates")
+const REPO_BASE = "https://raw.githubusercontent.com/wess/butter/main/templates"
 
-const templateFiles: Record<string, string[]> = {
-  vanilla: [
-    "butter.yaml",
-    "package.json.tmpl",
-    "src/app/index.html",
-    "src/app/main.ts",
-    "src/app/styles.css",
-    "src/host/index.ts",
-    "src/host/menu.ts",
-    "src/env.d.ts",
-  ],
-  react: [
-    "butter.yaml",
-    "package.json.tmpl",
-    "src/app/index.html",
-    "src/app/main.tsx",
-    "src/app/styles.css",
-    "src/host/index.ts",
-    "src/host/menu.ts",
-    "src/env.d.ts",
-  ],
-  svelte: [
-    "butter.yaml",
-    "package.json.tmpl",
-    "src/app/index.html",
-    "src/app/main.ts",
-    "src/app/app.svelte",
-    "src/app/styles.css",
-    "src/host/index.ts",
-    "src/host/menu.ts",
-    "src/env.d.ts",
-  ],
-  vue: [
-    "butter.yaml",
-    "package.json.tmpl",
-    "src/app/index.html",
-    "src/app/main.ts",
-    "src/app/app.vue",
-    "src/app/styles.css",
-    "src/host/index.ts",
-    "src/host/menu.ts",
-    "src/env.d.ts",
-  ],
+const fetchText = async (url: string): Promise<string> => {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Failed to fetch ${url}: ${res.status}`)
+  return res.text()
+}
+
+const fetchRegistry = async (): Promise<Record<string, string[]>> => {
+  const text = await fetchText(`${REPO_BASE}/registry.json`)
+  return JSON.parse(text)
 }
 
 const replacePlaceholders = (content: string, name: string): string =>
@@ -77,17 +43,13 @@ export const runInit = async (rawArgs: string[]): Promise<void> => {
     process.exit(1)
   }
 
-  const files = templateFiles[template]
-  if (!files) {
-    const available = Object.keys(templateFiles).join(", ")
-    console.error(`Unknown template "${template}". Available: ${available}`)
-    process.exit(1)
-  }
+  console.log("Fetching templates...")
+  const registry = await fetchRegistry()
 
-  const templateDir = join(TEMPLATES_DIR, template)
-  const templateDirExists = await Bun.file(join(templateDir, "butter.yaml")).exists()
-  if (!templateDirExists) {
-    console.error(`Template directory not found: ${templateDir}`)
+  const files = registry[template]
+  if (!files) {
+    const available = Object.keys(registry).join(", ")
+    console.error(`Unknown template "${template}". Available: ${available}`)
     process.exit(1)
   }
 
@@ -100,18 +62,21 @@ export const runInit = async (rawArgs: string[]): Promise<void> => {
     process.exit(1)
   }
 
-  console.log(`Creating project "${projectName}" using template "${template}" in ${target}`)
+  console.log(`Creating project "${projectName}" using template "${template}"...`)
 
-  for (const relPath of files) {
-    const src = join(templateDir, relPath)
+  const fetches = files.map(async (relPath) => {
+    const url = `${REPO_BASE}/${template}/${relPath}`
+    const content = await fetchText(url)
+    return { relPath, content }
+  })
+
+  const results = await Promise.all(fetches)
+
+  for (const { relPath, content } of results) {
     const dest = join(target, outputName(relPath))
     const destDir = dirname(dest)
-
     await Bun.$`mkdir -p ${destDir}`
-
-    const content = await Bun.file(src).text()
-    const replaced = replacePlaceholders(content, projectName)
-    await Bun.write(dest, replaced)
+    await Bun.write(dest, replacePlaceholders(content, projectName))
   }
 
   console.log()

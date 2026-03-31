@@ -128,25 +128,28 @@ jobs:
 
   update-homebrew:
     runs-on: ubuntu-latest
-    needs: [check-version, publish]
+    needs: [check-version, build-binaries]
     if: needs.check-version.outputs.changed == 'true'
     steps:
-      - name: Wait for release tarball
+      - name: Download release binaries and compute SHAs
+        id: shas
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          URL="https://github.com/wess/butter/archive/refs/tags/v${VERSION}.tar.gz"
-          for i in $(seq 1 30); do
-            if curl -fsSL -o /tmp/butter.tar.gz "$URL" 2>/dev/null; then
-              echo "Tarball available"
-              break
-            fi
-            echo "Waiting for tarball... ($i/30)"
-            sleep 10
+          BASE="https://github.com/wess/butter/releases/download/v${VERSION}"
+          for target in darwin-arm64 darwin-x64 linux-x64; do
+            FILE="butter-${target}.tar.gz"
+            for i in $(seq 1 30); do
+              if curl -fsSL -o "/tmp/${FILE}" "${BASE}/${FILE}" 2>/dev/null; then
+                echo "${target} available"
+                break
+              fi
+              echo "Waiting for ${target}... ($i/30)"
+              sleep 10
+            done
+            SHA=$(sha256sum "/tmp/${FILE}" | cut -d' ' -f1)
+            KEY=$(echo "${target}" | tr '-' '_')
+            echo "sha_${KEY}=${SHA}" >> "$GITHUB_OUTPUT"
           done
-
-      - name: Compute SHA256
-        id: sha
-        run: echo "sha256=$(sha256sum /tmp/butter.tar.gz | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
         uses: actions/checkout@v5
@@ -158,38 +161,38 @@ jobs:
       - name: Update formula
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          SHA="${{ steps.sha.outputs.sha256 }}"
-          cat > tap/Formula/butter.rb << RUBY
+          cat > tap/Formula/butter.rb << 'RUBY'
           class Butter < Formula
             desc "Lightweight desktop app framework with native webview and TypeScript"
             homepage "https://github.com/wess/butter"
-            url "https://github.com/wess/butter/archive/refs/tags/v${VERSION}.tar.gz"
-            sha256 "${SHA}"
-            license "MIT"
+            version "VERSION_PLACEHOLDER"
 
-            depends_on "bun"
-
-            def install
-              system "bun", "add", "-g", "butterframework@#{version}"
+            if OS.mac?
+              if Hardware::CPU.intel?
+                url "https://github.com/wess/butter/releases/download/v#{version}/butter-darwin-x64.tar.gz"
+                sha256 "SHA_DARWIN_X64_PLACEHOLDER"
+              else # ARM
+                url "https://github.com/wess/butter/releases/download/v#{version}/butter-darwin-arm64.tar.gz"
+                sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
+              end
+            elsif OS.linux?
+              url "https://github.com/wess/butter/releases/download/v#{version}/butter-linux-x64.tar.gz"
+              sha256 "SHA_LINUX_X64_PLACEHOLDER"
             end
 
-            def caveats
-              <<~EOS
-                Butter requires Bun to be installed.
-
-                Get started:
-                  butter init myapp
-                  cd myapp
-                  bun install
-                  bun run dev
-              EOS
+            def install
+              bin.install "butter"
             end
 
             test do
-              assert_match "butter", shell_output("#{bin}/butter help")
+              assert_match "Usage: butter <command>", shell_output("#{bin}/butter")
             end
           end
           RUBY
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" tap/Formula/butter.rb
+          sed -i "s/SHA_DARWIN_X64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_x64 }}/g" tap/Formula/butter.rb
+          sed -i "s/SHA_DARWIN_ARM64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_arm64 }}/g" tap/Formula/butter.rb
+          sed -i "s/SHA_LINUX_X64_PLACEHOLDER/${{ steps.shas.outputs.sha_linux_x64 }}/g" tap/Formula/butter.rb
 
       - name: Push updated formula
         run: |
