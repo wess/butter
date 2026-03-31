@@ -370,6 +370,7 @@ Produces a single executable:
 Creates an OS-native app package:
 - **macOS**: `.app` bundle with `Info.plist`, icon, and the compiled binary
 - **Linux**: AppDir structure with `.desktop` file and `AppRun` symlink
+- **Windows**: Distribution folder with `.exe` and resources
 
 ### `butter doctor`
 
@@ -472,6 +473,18 @@ sudo dnf install webkit2gtk4.1-devel gtk3-devel
 sudo pacman -S webkit2gtk-4.1 gtk3
 ```
 
+### Windows
+
+Requires [Bun for Windows](https://bun.sh), a C compiler (MSVC or MinGW), and the WebView2 runtime (pre-installed on Windows 10 21H2+ and Windows 11).
+
+```powershell
+# Install Bun
+powershell -c "irm bun.sh/install.ps1 | iex"
+
+# Compiler: install Visual Studio Build Tools (includes cl.exe)
+# Or install MinGW-GCC
+```
+
 ## Architecture
 
 ```
@@ -483,7 +496,7 @@ Platform Shim (ObjC/C)          Native window + webview
 
 ### IPC
 
-Shared memory with two ring buffers. Messages are length-prefixed JSON. Signaling via POSIX named semaphores.
+Shared memory with two ring buffers. Messages are length-prefixed JSON. Signaling via platform-native mechanisms (POSIX semaphores on macOS/Linux, named events on Windows).
 
 ```
 +----------+------------------+------------------+

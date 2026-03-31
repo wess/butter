@@ -79,7 +79,7 @@ None. The project directory is always `process.cwd()`.
 2. Loads `butter.yaml` (or defaults) from the project directory.
 3. Compiles the native shim binary to `.butter/shim` if the binary is missing or the source is newer than the binary.
 4. Bundles `src/app/index.html` (and its imports) via Bun's bundler into `.butter/build/`. JS modules and CSS are inlined into the HTML to satisfy WKWebView's `file://` restrictions.
-5. Creates a 128 KB POSIX shared memory region named `/butter_<pid>` and two named semaphores (`/butter_<pid>.tb`, `/butter_<pid>.ts`).
+5. Creates a 128 KB shared memory region and signaling primitives (POSIX semaphores on macOS/Linux, named events on Windows).
 6. Passes `BUTTER_TITLE` (and optionally `BUTTER_MENU`) to the shim process via environment variables, then spawns the shim.
 7. Imports `src/host/index.ts` dynamically, which registers handlers via `on()`.
 8. Enters a poll loop at approximately 60 Hz. Incoming `invoke` messages are dispatched to registered handlers; responses are written back. Outgoing `event` messages queued by `send()` are flushed each tick.
@@ -115,7 +115,7 @@ None. The project directory is always `process.cwd()`.
 2. Loads `butter.yaml`.
 3. Compiles the native shim if stale.
 4. Bundles app assets with minification enabled into `.butter/build/`. Inlines JS and CSS into the HTML.
-5. Base64-encodes the shim binary and `semhelper.dylib`.
+5. Base64-encodes the shim binary (and `semhelper.dylib`/`.so` on macOS/Linux).
 6. Collects all built assets as base64 strings.
 7. Generates a bootstrap TypeScript module (`.butter/bootstrap.ts`) that:
    - Extracts the shim and assets to a temp directory at startup.
@@ -154,11 +154,11 @@ None.
 
 **Checks performed**
 
-| Check | macOS | Linux |
-|---|---|---|
-| Bun | `Bun.version` | `Bun.version` |
-| Compiler | `clang --version` | `tcc -v` |
-| WebView | WKWebView (always available) | `pkg-config --exists webkit2gtk-4.1` |
+| Check | macOS | Linux | Windows |
+|---|---|---|---|
+| Bun | `Bun.version` | `Bun.version` | `Bun.version` |
+| Compiler | `clang --version` | `tcc -v` | `cl` or `gcc --version` |
+| WebView | WKWebView (always available) | `pkg-config --exists webkit2gtk-4.1` | WebView2 (registry check) |
 
 **Output**
 
@@ -172,6 +172,8 @@ Each check prints a status line. If any check fails, a remediation hint is print
 | clang not found (macOS) | `xcode-select --install` |
 | tcc not found (Linux) | `sudo apt install tcc` |
 | WebKitGTK missing (Linux) | `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev` |
+| Compiler not found (Windows) | Install Visual Studio Build Tools (MSVC) or MinGW-GCC |
+| WebView2 missing (Windows) | Install from https://developer.microsoft.com/en-us/microsoft-edge/webview2/ |
 
 **Example**
 
@@ -202,6 +204,7 @@ The command reads `butter.yaml`, locates the compiled binary in `dist/`, and pro
 |---|---|---|
 | macOS | `dist/<App Name>.app` | `.app` bundle with `Contents/MacOS/<binary>`, `Contents/Resources/` (icon if configured), and `Contents/Info.plist` |
 | Linux | `dist/<App Name>.AppDir` | AppDir with `usr/bin/<binary>`, `AppRun` symlink, `.desktop` file, and icon if configured |
+| Windows | `dist/<App Name>/` | Directory with `.exe` binary and icon if configured |
 
 The `Info.plist` (macOS) and `.desktop` file (Linux) are generated from `butter.yaml`. The bundle identifier defaults to `com.example.<appname>` and the category defaults to `public.app-category.utilities` (macOS) or `Utility` (Linux). Both can be overridden in `butter.yaml` under `bundle.identifier` and `bundle.category`.
 

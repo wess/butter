@@ -70,6 +70,18 @@ dist/My App.app/
 
 The generated `Info.plist` includes the app name, bundle identifier, version, and category. If you have configured `bundle.urlSchemes` in `butter.yaml`, the plist will include `CFBundleURLTypes` entries so the OS routes those URLs to your app.
 
+### Windows
+
+On Windows, `butter bundle` creates a distribution directory:
+
+```
+dist/My App/
+  myapp.exe           # the compiled binary
+  icon.ico            # if window.icon is set in butter.yaml
+```
+
+The directory can be distributed as a `.zip` or used as input for an installer tool (Inno Setup, NSIS, WiX).
+
 ### Linux
 
 On Linux, `butter bundle` creates an AppDir:
@@ -171,8 +183,9 @@ Each step depends on the previous one. `butter bundle` requires the compiled bin
 
 The binary is self-contained except for the OS webview:
 
-- macOS: WKWebView is part of the OS. No additional libraries needed.
-- Linux: Requires WebKitGTK to be installed on the user's machine. It is typically present on any desktop Linux system, but is not embedded in the binary.
+- **macOS**: WKWebView is part of the OS. No additional libraries needed.
+- **Linux**: Requires WebKitGTK to be installed on the user's machine. It is typically present on any desktop Linux system, but is not embedded in the binary.
+- **Windows**: Requires the WebView2 runtime, which is pre-installed on Windows 10 21H2+ and all Windows 11 systems. Older systems may need to install it from Microsoft.
 
 Linux users need WebKitGTK:
 

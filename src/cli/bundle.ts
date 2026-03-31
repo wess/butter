@@ -154,19 +154,47 @@ export const bundleLinuxAppDir = async (
   return appDirPath
 }
 
+// ── Windows ───────────────────────────────────────────────────────────────
+
+export const bundleWindowsApp = async (
+  binaryPath: string,
+  config: Config,
+  projectDir: string,
+): Promise<string> => {
+  const executableName = basename(binaryPath)
+  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || basename(binaryPath, ".exe")
+  const bundlePath = join(projectDir, "dist", appName)
+
+  await mkdir(bundlePath, { recursive: true })
+
+  const destBinary = join(bundlePath, executableName)
+  await Bun.write(destBinary, Bun.file(binaryPath))
+
+  // Copy icon if configured (.ico for Windows)
+  if (config.window.icon) {
+    const iconSrc = join(projectDir, config.window.icon)
+    if (existsSync(iconSrc)) {
+      const ext = iconSrc.split(".").pop() ?? "ico"
+      await Bun.write(join(bundlePath, `icon.${ext}`), Bun.file(iconSrc))
+    }
+  }
+
+  return bundlePath
+}
+
 // ── bundle command entry point ─────────────────────────────────────────────
 
 export const runBundle = async (projectDir: string): Promise<void> => {
   const config = await loadConfig(projectDir)
   const appName = config.window.title.toLowerCase().replace(/[^a-z0-9]/g, "") || basename(projectDir)
-  const binaryPath = join(projectDir, "dist", appName)
+  const os = platform()
+  const ext = os === "win32" ? ".exe" : ""
+  const binaryPath = join(projectDir, "dist", `${appName}${ext}`)
 
   if (!existsSync(binaryPath)) {
     console.error(`Binary not found at ${binaryPath}. Run "butter compile" first.`)
     process.exit(1)
   }
-
-  const os = platform()
 
   if (os === "darwin") {
     console.log(`\nBundling "${config.window.title}" for macOS...`)
@@ -177,6 +205,10 @@ export const runBundle = async (projectDir: string): Promise<void> => {
     const appDirPath = await bundleLinuxAppDir(binaryPath, config, projectDir)
     console.log(`  AppDir: ${appDirPath}`)
     console.log(`  To create a distributable .AppImage, run appimagetool on the AppDir above.`)
+  } else if (os === "win32") {
+    console.log(`\nBundling "${config.window.title}" for Windows...`)
+    const bundlePath = await bundleWindowsApp(binaryPath, config, projectDir)
+    console.log(`  Bundle: ${bundlePath}`)
   } else {
     console.error(`Bundle is not yet supported on ${os}.`)
     process.exit(1)

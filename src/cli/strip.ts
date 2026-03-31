@@ -16,6 +16,13 @@ export const stripBinary = async (binaryPath: string): Promise<StripResult> => {
     await Bun.$`strip -x ${binaryPath}`
   } else if (os === "linux") {
     await Bun.$`strip --strip-unneeded ${binaryPath}`
+  } else if (os === "win32") {
+    try {
+      await Bun.$`strip --strip-unneeded ${binaryPath}`
+    } catch {
+      console.log("  Strip: no strip tool found, skipping.")
+      return { before, after: before, saved: 0 }
+    }
   } else {
     console.log("  Strip: unsupported platform, skipping.")
     return { before, after: before, saved: 0 }

@@ -28,13 +28,24 @@ export const checkCompiler = async (): Promise<CheckResult> => {
       const result = await $`tcc -v 2>&1`.text()
       return { name: "Compiler", ok: true, detail: result.trim() }
     }
+    if (platform === "win32") {
+      try {
+        const result = await $`cl 2>&1`.text()
+        const match = result.match(/Version\s+([\d.]+)/)
+        return { name: "Compiler", ok: true, detail: `MSVC ${match?.[1] ?? "unknown"}` }
+      } catch {
+        const result = await $`gcc --version`.text()
+        const match = result.match(/gcc.*?([\d.]+)/)
+        return { name: "Compiler", ok: true, detail: `MinGW-GCC ${match?.[1] ?? "unknown"}` }
+      }
+    }
     return { name: "Compiler", ok: false, detail: "Unsupported platform" }
   } catch {
     const fix = platform === "darwin"
       ? "Install Xcode Command Line Tools: xcode-select --install"
       : platform === "linux"
         ? "Install TinyCC: sudo apt install tcc"
-        : "Install MinGW-GCC"
+        : "Install MSVC (Visual Studio Build Tools) or MinGW-GCC"
     return { name: "Compiler", ok: false, detail: "Not found", fix }
   }
 }
@@ -56,6 +67,25 @@ export const checkWebview = async (): Promise<CheckResult> => {
         detail: "MISSING",
         fix: "sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev",
       }
+    }
+  }
+  if (platform === "win32") {
+    try {
+      const result = await $`reg query "HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}" /v pv`.text()
+      const match = result.match(/pv\s+REG_SZ\s+([\d.]+)/)
+      if (match) {
+        return { name: "Webview", ok: true, detail: `WebView2 ${match[1]}` }
+      }
+    } catch {}
+    try {
+      await $`where WebView2Loader.dll`.quiet()
+      return { name: "Webview", ok: true, detail: "WebView2 (loader found)" }
+    } catch {}
+    return {
+      name: "Webview",
+      ok: false,
+      detail: "MISSING",
+      fix: "Install WebView2 Runtime: https://developer.microsoft.com/en-us/microsoft-edge/webview2/",
     }
   }
   return { name: "Webview", ok: false, detail: "Platform not yet supported" }

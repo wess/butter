@@ -7,8 +7,10 @@ export const shimSourcePath = (): string => {
   return join(import.meta.dir, file)
 }
 
-export const shimBinaryPath = (projectDir: string): string =>
-  join(projectDir, ".butter", "shim")
+export const shimBinaryPath = (projectDir: string): string => {
+  const ext = process.platform === "win32" ? ".exe" : ""
+  return join(projectDir, ".butter", `shim${ext}`)
+}
 
 export const needsRecompile = async (
   binaryPath: string,
@@ -39,7 +41,8 @@ export const compileShim = async (projectDir: string): Promise<string> => {
   const output = shimBinaryPath(projectDir)
   const outputDir = dirname(output)
 
-  await $`mkdir -p ${outputDir}`
+  const { mkdir } = await import("fs/promises")
+  await mkdir(outputDir, { recursive: true })
 
   if (process.platform === "darwin") {
     await $`clang -o ${output} ${source} -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -fobjc-arc`
@@ -47,6 +50,12 @@ export const compileShim = async (projectDir: string): Promise<string> => {
     const cflags = await $`pkg-config --cflags gtk+-3.0 webkit2gtk-4.1`.text()
     const libs = await $`pkg-config --libs gtk+-3.0 webkit2gtk-4.1`.text()
     await $`tcc -o ${output} ${source} ${cflags.trim().split(" ")} ${libs.trim().split(" ")}`
+  } else if (process.platform === "win32") {
+    try {
+      await $`cl.exe /Fe:${output} ${source} /link ole32.lib user32.lib gdi32.lib shell32.lib shcore.lib advapi32.lib WebView2Loader.lib`
+    } catch {
+      await $`gcc -o ${output} ${source} -lole32 -luser32 -lgdi32 -lshell32 -lshcore -ladvapi32 -lWebView2Loader -mwindows`
+    }
   }
 
   // Stamp version so we know when to recompile after package updates
@@ -65,24 +74,24 @@ export const spawnShim = async (
   htmlPath: string,
   env?: Record<string, string>,
 ): Promise<ReturnType<typeof Bun.spawn>> => {
+  let execPath = binaryPath
+
   // macOS uses argv[0] as the app name in the menu bar.
   // Create a symlink named after the app title so the menu shows the right name.
-  const appName = env?.BUTTER_TITLE ?? "Butter App"
-  const safeName = appName.replace(/[^a-zA-Z0-9 ]/g, "")
-  const linkPath = join(dirname(binaryPath), safeName)
+  if (process.platform !== "win32") {
+    const appName = env?.BUTTER_TITLE ?? "Butter App"
+    const safeName = appName.replace(/[^a-zA-Z0-9 ]/g, "")
+    const linkPath = join(dirname(binaryPath), safeName)
 
-  try {
-    await $`ln -sf ${binaryPath} ${linkPath}`.quiet()
-  } catch {
-    // Fall back to the raw binary path
-    return Bun.spawn([binaryPath, shmName, htmlPath], {
-      stdout: "pipe",
-      stderr: "inherit",
-      env: { ...process.env, ...env },
-    })
+    try {
+      await $`ln -sf ${binaryPath} ${linkPath}`.quiet()
+      execPath = linkPath
+    } catch {
+      // Fall back to the raw binary path
+    }
   }
 
-  return Bun.spawn([linkPath, shmName, htmlPath], {
+  return Bun.spawn([execPath, shmName, htmlPath], {
     stdout: "pipe",
     stderr: "inherit",
     env: { ...process.env, ...env },

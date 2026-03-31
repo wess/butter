@@ -12,8 +12,8 @@ A running Butter application consists of exactly two operating system processes.
 ┌─────────────────────────────────┐      ┌──────────────────────────────────┐
 │  Host Process (Bun)             │      │  Shim Process (native binary)    │
 │                                 │      │                                  │
-│  src/host/index.ts              │      │  darwin.m / linux.c              │
-│  Runtime, IPC poll loop         │      │  Cocoa + WKWebView               │
+│  src/host/index.ts              │      │  darwin.m / linux.c / windows.c  │
+│  Runtime, IPC poll loop         │      │  Native webview (per platform)   │
 │  Handles invoke, sends events   │◄────►│  Handles OS events, renders HTML │
 │                                 │      │                                  │
 └─────────────────────────────────┘      └──────────────────────────────────┘
@@ -26,7 +26,7 @@ A running Butter application consists of exactly two operating system processes.
 
 **Host process** — Bun runs `src/host/index.ts`. This file imports from `"butter"` and calls `on()` to register handlers. The CLI creates a `Runtime` instance, stores it on `globalThis.__butterRuntime`, then imports the host file. After that, the CLI's poll loop drives all IPC.
 
-**Shim process** — A compiled C/Objective-C binary. On macOS it uses Cocoa and WKWebView; on Linux it uses GTK and WebKitGTK. The shim opens (not creates) the shared memory region by name, maps it, and opens both semaphores. It owns the native window and dispatches all windowing events on the main thread.
+**Shim process** — A compiled C/Objective-C binary. On macOS it uses Cocoa and WKWebView; on Linux it uses GTK and WebKitGTK; on Windows it uses Win32 and WebView2. The shim opens (not creates) the shared memory region by name, maps it, and opens the signaling primitives (semaphores on macOS/Linux, named events on Windows). It owns the native window and dispatches all windowing events on the main thread.
 
 **Lifecycle**
 
@@ -121,24 +121,31 @@ free(w, r)      = r > w ? r - w - 1 : RING_SIZE - (w - r) - 1
 
 The shim (in C/Objective-C) performs symmetric operations on the opposite rings.
 
-**Semaphores**
+**Signaling**
 
-Two POSIX named semaphores are created alongside the shared memory region:
+Two signaling primitives are created alongside the shared memory region:
 
-| Name | Signaled by | Waited on by |
+| Platform | Mechanism | Names |
 |---|---|---|
-| `/butter_<pid>.tb` | shim (after writing to the to-bun ring) | host (optional; currently uses polling) |
-| `/butter_<pid>.ts` | host (after writing to the to-shim ring) | shim (poll timer calls `sem_trywait`) |
+| macOS/Linux | POSIX named semaphores | `/butter_<pid>.tb`, `/butter_<pid>.ts` |
+| Windows | Win32 named events (auto-reset) | `butter_<pid>_tb`, `butter_<pid>_ts` |
 
-In development mode the host uses `setTimeout`-based polling at ~60 Hz rather than blocking on `sem_wait`. The semaphore is still posted after every write to ensure the shim wakes promptly.
+| Name suffix | Signaled by | Waited on by |
+|---|---|---|
+| `.tb` / `_tb` | shim (after writing to the to-bun ring) | host (optional; currently uses polling) |
+| `.ts` / `_ts` | host (after writing to the to-shim ring) | shim (poll timer checks for signal) |
+
+In development mode the host uses `setTimeout`-based polling at ~60 Hz rather than blocking on the signal. The signal is still posted after every write to ensure the shim wakes promptly.
+
+Note: On Windows, shared memory names have no leading `/` (e.g., `butter_1234` instead of `/butter_1234`).
 
 ---
 
-## ARM64 Variadic ABI Workaround
+## ARM64 Variadic ABI Workaround (macOS/Linux only)
 
 `shm_open` and `sem_open` are variadic C functions. Bun's FFI layer cannot correctly call variadic functions on Apple Silicon (ARM64) because the ABI requires variadic arguments to be passed differently.
 
-To work around this, `src/ipc/shmem.ts` compiles a small C helper (`src/ipc/native/semhelper.c`) into a shared library (`semhelper.dylib`). The helper exports non-variadic wrappers:
+To work around this, `src/ipc/shmem/darwin.ts` compiles a small C helper (`src/ipc/native/semhelper.c`) into a shared library (`semhelper.dylib` on macOS, `semhelper.so` on Linux). The helper exports non-variadic wrappers:
 
 ```c
 int shm_open_create(const char *name, int flags, unsigned mode);
@@ -147,7 +154,9 @@ sem_t *sem_open_create(const char *name, int flags, unsigned mode, unsigned valu
 sem_t *sem_open_existing(const char *name, int flags);
 ```
 
-These are called via `bun:ffi` without variadic arguments. The helper is auto-compiled at startup if missing or stale. In compiled binaries, the dylib is base64-embedded and extracted to a temp directory at launch.
+These are called via `bun:ffi` without variadic arguments. The helper is auto-compiled at startup if missing or stale. In compiled binaries, the shared library is base64-embedded and extracted to a temp directory at launch.
+
+This workaround is not needed on Windows, which uses `CreateFileMappingA`, `MapViewOfFile`, and `CreateEventA` from `kernel32.dll` — none of which are variadic.
 
 ---
 
@@ -201,7 +210,7 @@ The host runs an equivalent poll at `Math.floor(1000 / 60)` ms (16 ms) using `se
 
 `butter compile` produces a single self-contained executable by:
 
-1. Base64-encoding the shim binary and `semhelper.dylib`.
+1. Base64-encoding the shim binary (and `semhelper.dylib`/`.so` on macOS/Linux).
 2. Base64-encoding every file in `.butter/build/`.
 3. Embedding all of the above as string literals in a generated TypeScript bootstrap module.
 4. Compiling the bootstrap with `bun build --compile`, which embeds the Bun runtime into the binary.

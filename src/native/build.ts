@@ -25,7 +25,13 @@ const compileC = async (
 
   if (process.platform === "darwin") {
     await $`clang -shared -fPIC -fvisibility=default -O2 -I${import.meta.dir} -o ${outputPath} ${sourcePath}`.quiet()
-  } else if (process.platform === "linux") {
+  } else if (process.platform === "win32") {
+    try {
+      await $`cl.exe /LD /O2 /I${import.meta.dir} /Fe:${outputPath} ${sourcePath}`.quiet()
+    } catch {
+      await $`gcc -shared -fPIC -O2 -I${import.meta.dir} -o ${outputPath} ${sourcePath}`.quiet()
+    }
+  } else {
     await $`cc -shared -fPIC -fvisibility=default -O2 -I${import.meta.dir} -o ${outputPath} ${sourcePath}`.quiet()
   }
 }
@@ -64,7 +70,8 @@ export const buildNativeExtensions = async (
   const entries = await readdir(nativeDir, { withFileTypes: true }).catch(() => [])
   if (entries.length === 0) return modules
 
-  await Bun.$`mkdir -p ${buildDir}`.quiet()
+  const { mkdir } = await import("fs/promises")
+  await mkdir(buildDir, { recursive: true })
 
   // Copy butter.h into the native dir for includes
   const butterHDest = join(nativeDir, "butter.h")

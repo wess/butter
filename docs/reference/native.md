@@ -11,7 +11,7 @@ Butter compiles C and [Moxy](https://github.com/moxylang/moxy) source files in `
 | `src/native/*.c` | C source files |
 | `src/native/*.mxy` | Moxy source files |
 | `src/native/butter.h` | Header with `BUTTER_EXPORT` macro (auto-copied) |
-| `.butter/native/*.dylib` | Compiled shared libraries (cached) |
+| `.butter/native/*.dylib\|.so\|.dll` | Compiled shared libraries (cached) |
 | `.butter/native/*.ts` | Generated TypeScript bindings |
 
 ## Marking Functions for Export
@@ -98,6 +98,7 @@ Compiled with the system C compiler:
 
 - **macOS**: `clang -shared -fPIC -fvisibility=default -O2`
 - **Linux**: `cc -shared -fPIC -fvisibility=default -O2`
+- **Windows**: `cl.exe /LD /O2` (MSVC) or `gcc -shared -fPIC -O2` (MinGW)
 
 ### Moxy files
 

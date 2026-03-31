@@ -117,7 +117,8 @@ const copyAssets = async (srcDir: string, destDir: string): Promise<void> => {
     const src = join(srcDir, entry.name)
     const dest = join(destDir, entry.name)
     if (entry.isDirectory()) {
-      await Bun.$`mkdir -p ${dest}`.quiet()
+      const { mkdir } = await import("fs/promises")
+      await mkdir(dest, { recursive: true })
       await copyAssets(src, dest)
     } else {
       const ext = entry.name.split(".").pop()?.toLowerCase() ?? ""
@@ -189,7 +190,9 @@ export const runDev = async (projectDir: string): Promise<void> => {
   const htmlPath = join(buildDir, "index.html")
 
   // 6. Create shared memory
-  const shmName = `/butter_${process.pid}`
+  const shmName = process.platform === "win32"
+    ? `butter_${process.pid}`
+    : `/butter_${process.pid}`
   const region = createSharedRegion(shmName, SHM_SIZE)
 
   // zero out the header

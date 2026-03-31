@@ -34,6 +34,18 @@ sudo dnf install webkit2gtk4.1-devel gtk3-devel
 sudo pacman -S webkit2gtk-4.1 gtk3
 ```
 
+### Windows
+
+Requires Bun for Windows and a C compiler (MSVC or MinGW). The WebView2 runtime is pre-installed on Windows 10 21H2+ and Windows 11.
+
+```powershell
+# Install Bun
+powershell -c "irm bun.sh/install.ps1 | iex"
+
+# Install Visual Studio Build Tools (for cl.exe)
+# Or install MinGW-GCC
+```
+
 ## Installation
 
 Install the Butter CLI globally via Bun:

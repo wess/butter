@@ -75,7 +75,8 @@ export const runInit = async (rawArgs: string[]): Promise<void> => {
   for (const { relPath, content } of results) {
     const dest = join(target, outputName(relPath))
     const destDir = dirname(dest)
-    await Bun.$`mkdir -p ${destDir}`
+    const { mkdir } = await import("fs/promises")
+    await mkdir(destDir, { recursive: true })
     await Bun.write(dest, replacePlaceholders(content, projectName))
   }
 

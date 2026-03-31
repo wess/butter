@@ -412,4 +412,4 @@ type SharedRegion = {
 }
 ```
 
-Holds references to the mapped shared memory buffer and both POSIX semaphore handles. Used by `src/ipc/shmem.ts`.
+Holds references to the mapped shared memory buffer and signaling handles (POSIX semaphores on macOS/Linux, named events on Windows). Used by the platform-specific modules in `src/ipc/shmem/`.
