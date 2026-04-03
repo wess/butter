@@ -1,6 +1,29 @@
 import type { Plugin, HostContext } from "../../types"
+import { existsSync } from "node:fs"
+import { resolve } from "node:path"
+
+const ALLOWED_SCHEMES = ["http:", "https:", "mailto:"]
+
+const validateUrl = (url: string): void => {
+  try {
+    const parsed = new URL(url)
+    if (!ALLOWED_SCHEMES.includes(parsed.protocol)) {
+      throw new Error(`URL scheme "${parsed.protocol}" is not allowed`)
+    }
+  } catch (err) {
+    if (err instanceof TypeError) throw new Error("Invalid URL")
+    throw err
+  }
+}
+
+const validatePath = (path: string): string => {
+  const resolved = resolve(path)
+  if (!existsSync(resolved)) throw new Error("Path does not exist")
+  return resolved
+}
 
 const openUrl = async (url: string): Promise<void> => {
+  validateUrl(url)
   const platform = process.platform
   if (platform === "darwin") {
     await Bun.$`open ${url}`
@@ -12,24 +35,26 @@ const openUrl = async (url: string): Promise<void> => {
 }
 
 const showInFolder = async (path: string): Promise<void> => {
+  const safe = validatePath(path)
   const platform = process.platform
   if (platform === "darwin") {
-    await Bun.$`open -R ${path}`
+    await Bun.$`open -R ${safe}`
   } else if (platform === "linux") {
-    await Bun.$`xdg-open ${path}`
+    await Bun.$`xdg-open ${safe}`
   } else if (platform === "win32") {
-    await Bun.$`explorer /select,${path}`
+    await Bun.$`explorer /select,${safe}`
   }
 }
 
 const openPath = async (path: string): Promise<void> => {
+  const safe = validatePath(path)
   const platform = process.platform
   if (platform === "darwin") {
-    await Bun.$`open ${path}`
+    await Bun.$`open ${safe}`
   } else if (platform === "linux") {
-    await Bun.$`xdg-open ${path}`
+    await Bun.$`xdg-open ${safe}`
   } else if (platform === "win32") {
-    await Bun.$`start ${path}`
+    await Bun.$`start ${safe}`
   }
 }
 

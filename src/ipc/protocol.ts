@@ -26,8 +26,12 @@ export const decode = (
   const json = new TextDecoder().decode(
     buf.subarray(offset + HEADER_SIZE, offset + HEADER_SIZE + len),
   )
-  const message = JSON.parse(json) as IpcMessage
-  return { message, bytesRead: HEADER_SIZE + len }
+  try {
+    const message = JSON.parse(json) as IpcMessage
+    return { message, bytesRead: HEADER_SIZE + len }
+  } catch {
+    return { message: null, bytesRead: HEADER_SIZE + len }
+  }
 }
 
 export const decodeAll = (buf: Uint8Array): IpcMessage[] => {

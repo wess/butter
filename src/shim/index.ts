@@ -92,7 +92,7 @@ export const spawnShim = async (
   }
 
   return Bun.spawn([execPath, shmName, htmlPath], {
-    stdout: "pipe",
+    stdout: "inherit",
     stderr: "inherit",
     env: { ...process.env, ...env },
   })

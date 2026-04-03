@@ -92,12 +92,18 @@ export const createRuntime = (
 
     control: (action, data) => {
       const id = String(nextId++)
-      const pending = new Map<string, (data: unknown) => void>()
       if (!globalThis.__butterPendingControls) {
         globalThis.__butterPendingControls = new Map()
       }
-      return new Promise<unknown>((resolve) => {
-        globalThis.__butterPendingControls.set(id, resolve)
+      return new Promise<unknown>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          globalThis.__butterPendingControls?.delete(id)
+          reject(new Error(`Control "${action}" timed out after 30s`))
+        }, 30_000)
+        globalThis.__butterPendingControls.set(id, (result: unknown) => {
+          clearTimeout(timer)
+          resolve(result)
+        })
         outgoing.push({ id, type: "control", action, data })
       })
     },

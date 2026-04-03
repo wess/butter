@@ -4,7 +4,20 @@ type SetParams = { service: string; key: string; value: string }
 type GetParams = { service: string; key: string }
 type DeleteParams = { service: string; key: string }
 
+const SAFE_KEY = /^[a-zA-Z0-9._-]+$/
+
+const validateKeyName = (name: string, label: string): void => {
+  if (!SAFE_KEY.test(name)) {
+    throw new Error(`${label} must be alphanumeric (with . _ -) only`)
+  }
+}
+
+const escapePowerShell = (s: string): string =>
+  s.replace(/'/g, "''")
+
 const storeSecret = async (service: string, key: string, value: string): Promise<void> => {
+  validateKeyName(service, "service")
+  validateKeyName(key, "key")
   const platform = process.platform
   if (platform === "darwin") {
     // Delete existing entry first to avoid duplicates, ignore errors
@@ -17,16 +30,20 @@ const storeSecret = async (service: string, key: string, value: string): Promise
   } else if (platform === "linux") {
     await Bun.$`secret-tool store --label=${key} service ${service} key ${key}`.write(value)
   } else if (platform === "win32") {
+    const safeValue = escapePowerShell(value)
+    const safeKey = escapePowerShell(key)
     const script = `
-      $secure = ConvertTo-SecureString '${value}' -AsPlainText -Force;
-      $cred = New-Object System.Management.Automation.PSCredential('${key}', $secure);
-      cmdkey /generic:${service}/${key} /user:${key} /pass:${value}
+      $secure = ConvertTo-SecureString '${safeValue}' -AsPlainText -Force;
+      $cred = New-Object System.Management.Automation.PSCredential('${safeKey}', $secure);
+      cmdkey /generic:${service}/${key} /user:${key} /pass:${safeValue}
     `
     await Bun.$`powershell -Command ${script}`.quiet()
   }
 }
 
 const retrieveSecret = async (service: string, key: string): Promise<string> => {
+  validateKeyName(service, "service")
+  validateKeyName(key, "key")
   const platform = process.platform
   if (platform === "darwin") {
     const result =
@@ -47,6 +64,8 @@ const retrieveSecret = async (service: string, key: string): Promise<string> => 
 }
 
 const removeSecret = async (service: string, key: string): Promise<void> => {
+  validateKeyName(service, "service")
+  validateKeyName(key, "key")
   const platform = process.platform
   if (platform === "darwin") {
     await Bun.$`security delete-generic-password -s ${service} -a ${key}`.quiet()

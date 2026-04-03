@@ -21,7 +21,9 @@ const sendNotification = async (opts: NotifyOptions): Promise<void> => {
     const args = opts.subtitle ? [title, `${opts.subtitle}\n${body}`] : [title, body]
     await Bun.$`notify-send ${args[0]} ${args[1]}`.quiet()
   } else if (platform === "win32") {
-    const ps = `[void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.ShowBalloonTip(5000, '${title}', '${body}', 'Info'); Start-Sleep -Seconds 1; $n.Dispose()`
+    const safeTitle = title.replace(/'/g, "''")
+    const safeBody = body.replace(/'/g, "''")
+    const ps = `[void] [System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms'); $n = New-Object System.Windows.Forms.NotifyIcon; $n.Icon = [System.Drawing.SystemIcons]::Information; $n.Visible = $true; $n.ShowBalloonTip(5000, '${safeTitle}', '${safeBody}', 'Info'); Start-Sleep -Seconds 1; $n.Dispose()`
     await Bun.$`powershell -Command ${ps}`.quiet()
   }
 }

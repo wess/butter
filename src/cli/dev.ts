@@ -251,6 +251,7 @@ export const runDev = async (projectDir: string): Promise<void> => {
 
   // 9. Poll loop
   let running = true
+  const retryQueue: IpcMessage[] = []
 
   const poll = () => {
     if (!running) return
@@ -263,7 +264,11 @@ export const runDev = async (projectDir: string): Promise<void> => {
           const response = makeMsg("response", msg.action, result)
           response.id = msg.id
           if (error) response.error = error
-          if (writeToShim(region.buffer, response)) signalToShim(region)
+          if (!writeToShim(region.buffer, response)) {
+            retryQueue.push(response)
+          } else {
+            signalToShim(region)
+          }
         }
 
         // Enforce allowlist
@@ -297,15 +302,27 @@ export const runDev = async (projectDir: string): Promise<void> => {
       }
     }
 
+    // Retry previously failed writes
+    let retryIdx = 0
+    while (retryIdx < retryQueue.length) {
+      if (writeToShim(region.buffer, retryQueue[retryIdx]!)) {
+        retryQueue.splice(retryIdx, 1)
+      } else {
+        break
+      }
+    }
+
     // Flush outgoing events
     const outgoing = runtime.drainOutgoing()
     let wrote = false
     for (const msg of outgoing) {
       if (writeToShim(region.buffer, msg)) {
         wrote = true
+      } else {
+        retryQueue.push(msg)
       }
     }
-    if (wrote) {
+    if (wrote || retryIdx > 0) {
       signalToShim(region)
     }
 
@@ -314,32 +331,43 @@ export const runDev = async (projectDir: string): Promise<void> => {
 
   poll()
 
-  // 9. Watch for file changes
+  // 9. Watch for file changes (debounced)
   const srcDir = join(projectDir, "src")
-  const watcher = watch(srcDir, { recursive: true }, async (eventType, filename) => {
+  let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+
+  const watcher = watch(srcDir, { recursive: true }, (eventType, filename) => {
     if (!filename || !running) return
-    console.log(`File changed: ${filename}, rebuilding...`)
-    try {
-      await bundleApp(projectDir, config.build.entry)
-      const reloadMsg = makeMsg("control", "reload")
-      if (writeToShim(region.buffer, reloadMsg)) {
-        signalToShim(region)
+    if (rebuildTimer) clearTimeout(rebuildTimer)
+    rebuildTimer = setTimeout(async () => {
+      rebuildTimer = null
+      console.log(`File changed: ${filename}, rebuilding...`)
+      try {
+        await bundleApp(projectDir, config.build.entry)
+        const reloadMsg = makeMsg("control", "reload")
+        if (writeToShim(region.buffer, reloadMsg)) {
+          signalToShim(region)
+        }
+      } catch (err) {
+        console.error("Rebuild failed:", err)
       }
-    } catch (err) {
-      console.error("Rebuild failed:", err)
-    }
+    }, 200)
   })
 
-  // 10. Handle shim exit
-  shimProc.exited.then(() => {
+  // 10. Cleanup helper
+  const cleanup = () => {
     running = false
     watcher.close()
-    destroySharedRegion(shmName)
+    try { destroySharedRegion(shmName) } catch {}
+  }
+
+  // 11. Handle shim exit
+  shimProc.exited.then(() => {
+    cleanup()
     console.log("\nWindow closed.")
     process.exit(0)
   })
 
-  // 11. Handle SIGINT
+  // 12. Handle SIGINT
   process.on("SIGINT", () => {
     console.log("\nShutting down...")
     const quitMsg = makeMsg("control", "quit")
@@ -347,10 +375,21 @@ export const runDev = async (projectDir: string): Promise<void> => {
       signalToShim(region)
     }
     setTimeout(() => {
-      running = false
-      watcher.close()
-      destroySharedRegion(shmName)
+      cleanup()
       process.exit(0)
     }, 1000)
+  })
+
+  // 13. Handle unexpected crashes — clean up shared memory
+  process.on("uncaughtException", (err) => {
+    console.error("Uncaught exception:", err)
+    cleanup()
+    process.exit(1)
+  })
+
+  process.on("unhandledRejection", (err) => {
+    console.error("Unhandled rejection:", err)
+    cleanup()
+    process.exit(1)
   })
 }

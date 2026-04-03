@@ -1,5 +1,9 @@
 import { test, expect, afterEach, describe } from "bun:test"
 
+if (process.platform !== "win32") {
+  test.skip("shmemwin tests require Windows", () => {})
+} else {
+
 const {
   createSharedRegion,
   openSharedRegion,
@@ -10,7 +14,7 @@ const {
 
 const uniqueName = () => {
   const id = Date.now() % 100000
-  return process.platform === "win32" ? `bt${id}` : `/bt${id}`
+  return `bt${id}`
 }
 
 let cleanup: string[] = []
@@ -53,3 +57,5 @@ describe("platform shared memory", () => {
     expect(tryWaitForShimSignal(region)).toBe(false)
   })
 })
+
+} // end platform guard

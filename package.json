@@ -1,6 +1,6 @@
 {
   "name": "butterframework",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "type": "module",
   "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
   "license": "MIT",
@@ -38,6 +38,9 @@
   },
   "peerDependencies": {
     "typescript": "^5"
+  },
+  "scripts": {
+    "test": "bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts tests/plugins.test.ts tests/dialog.test.ts tests/native.test.ts tests/cli.test.ts tests/allowlist.test.ts tests/bundle.test.ts tests/sign.test.ts tests/streaming.test.ts tests/window.test.ts tests/ipcround.test.ts tests/ring.test.ts tests/devloop.test.ts tests/shmemwin.test.ts && bun test tests/shmem.test.ts"
   },
   "engines": {
     "bun": ">=1.2.0"
