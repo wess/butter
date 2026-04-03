@@ -12,7 +12,7 @@ test("checkCompiler finds clang on macOS", async () => {
   const result = await checkCompiler()
   expect(result.ok).toBe(true)
   expect(result.detail).toContain("clang")
-})
+}, 10_000)
 
 test("checkWebview reports OK on macOS", async () => {
   if (process.platform !== "darwin") return
@@ -25,4 +25,4 @@ test("runDoctor returns all checks", async () => {
   const results = await runDoctor()
   expect(results.length).toBeGreaterThanOrEqual(3)
   expect(results.every((r) => typeof r.ok === "boolean")).toBe(true)
-})
+}, 10_000)

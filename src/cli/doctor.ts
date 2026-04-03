@@ -16,25 +16,33 @@ export const checkBun = async (): Promise<CheckResult> => {
   }
 }
 
+const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+  Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error("timed out")), ms),
+    ),
+  ])
+
 export const checkCompiler = async (): Promise<CheckResult> => {
   const platform = process.platform
   try {
     if (platform === "darwin") {
-      const result = await $`clang --version`.text()
+      const result = await withTimeout($`clang --version`.text(), 5000)
       const match = result.match(/version\s+([\d.]+)/)
       return { name: "Compiler", ok: true, detail: `clang ${match?.[1] ?? "unknown"}` }
     }
     if (platform === "linux") {
-      const result = await $`cc -v 2>&1`.text()
+      const result = await withTimeout($`cc -v 2>&1`.text(), 5000)
       return { name: "Compiler", ok: true, detail: result.trim() }
     }
     if (platform === "win32") {
       try {
-        const result = await $`cl 2>&1`.text()
+        const result = await withTimeout($`cl 2>&1`.text(), 5000)
         const match = result.match(/Version\s+([\d.]+)/)
         return { name: "Compiler", ok: true, detail: `MSVC ${match?.[1] ?? "unknown"}` }
       } catch {
-        const result = await $`gcc --version`.text()
+        const result = await withTimeout($`gcc --version`.text(), 5000)
         const match = result.match(/gcc.*?([\d.]+)/)
         return { name: "Compiler", ok: true, detail: `MinGW-GCC ${match?.[1] ?? "unknown"}` }
       }
