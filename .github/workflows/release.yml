@@ -3,153 +3,225 @@ name: Release
 on:
   push:
     branches: [main]
-    paths:
-      - "package.json"
+    paths: ["package.json"]
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   check-version:
     runs-on: ubuntu-latest
     outputs:
       changed: ${{ steps.diff.outputs.changed }}
-      version: ${{ steps.version.outputs.version }}
+      version: ${{ steps.diff.outputs.version }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          fetch-depth: 2
 
-      - name: Check if version changed
+      - name: Detect version change
         id: diff
         run: |
-          OLD=$(git show HEAD~1:package.json | jq -r '.version' 2>/dev/null || echo "")
           NEW=$(jq -r '.version' package.json)
-          if [ "$OLD" != "$NEW" ]; then
+          PUBLISHED=$(curl -fsSL "https://registry.npmjs.org/butterframework" 2>/dev/null \
+            | jq -r '.["dist-tags"].latest // ""' || echo "")
+          echo "version=${NEW}" >> "$GITHUB_OUTPUT"
+          if [ -z "$PUBLISHED" ] || [ "$PUBLISHED" != "$NEW" ]; then
             echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Local ${NEW} differs from published '${PUBLISHED}', will release"
           else
             echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version ${NEW} already published, skipping"
           fi
 
-      - name: Get version
-        id: version
-        run: echo "version=$(jq -r '.version' package.json)" >> "$GITHUB_OUTPUT"
-
-  publish:
-    runs-on: macos-latest
+  test:
     needs: check-version
-    if: needs.check-version.outputs.changed == 'true'
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
 
-      - run: bun install
-      - name: Run tests
+      - name: Install Linux WebKit deps
+        if: runner.os == 'Linux'
         run: |
-          bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts
-          bun test tests/shmem.test.ts
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev
 
-      - name: Publish to npm
+      - run: bun install --frozen-lockfile
+      - run: bun run test
+
+  build-binaries:
+    needs: [check-version, test]
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    name: build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            target: bun-darwin-arm64
+            name: butter-darwin-arm64
+            archive: tar.gz
+            ext: ""
+            smoke: true
+          - os: macos-13
+            target: bun-darwin-x64
+            name: butter-darwin-x64
+            archive: tar.gz
+            ext: ""
+            smoke: true
+          - os: ubuntu-latest
+            target: bun-linux-x64
+            name: butter-linux-x64
+            archive: tar.gz
+            ext: ""
+            smoke: true
+          - os: ubuntu-latest
+            target: bun-linux-arm64
+            name: butter-linux-arm64
+            archive: tar.gz
+            ext: ""
+            # Cross-compiled from x64 — can't run on this runner.
+            smoke: false
+          - os: windows-latest
+            target: bun-windows-x64
+            name: butter-windows-x64
+            archive: zip
+            ext: ".exe"
+            smoke: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Compile binary
+        shell: bash
         run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
-          bun publish --access public
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          mkdir -p dist
+          bun build --compile --target=${{ matrix.target }} \
+            src/cli/index.ts --outfile dist/butter${{ matrix.ext }}
 
-      - name: Create git tag
+      - name: Smoke test (CLI prints usage)
+        if: matrix.smoke
+        shell: bash
+        run: ./dist/butter${{ matrix.ext }} help
+
+      - name: Archive (tar.gz)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: tar -czf ${{ matrix.name }}.tar.gz -C dist butter
+
+      - name: Archive (zip)
+        if: matrix.archive == 'zip'
+        shell: bash
+        run: 7z a ${{ matrix.name }}.zip ./dist/butter.exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.name }}.${{ matrix.archive }}
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    needs: [check-version, build-binaries]
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Stage artifacts
         run: |
-          git tag "v${{ needs.check-version.outputs.version }}"
-          git push origin "v${{ needs.check-version.outputs.version }}"
+          mkdir -p dist
+          find artifacts -type f \( -name '*.tar.gz' -o -name '*.zip' \) -exec cp {} dist/ \;
+          ls -l dist
 
-      - name: Create GitHub Release
+      - name: Create or update tag
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --tags origin "refs/tags/v${VERSION}" | grep -q .; then
+            echo "Tag v${VERSION} already exists, skipping creation"
+          else
+            git tag "v${VERSION}"
+            git push origin "v${VERSION}"
+          fi
+
+      - name: Create GitHub Release with binaries
         uses: softprops/action-gh-release@v2
         with:
           tag_name: "v${{ needs.check-version.outputs.version }}"
           generate_release_notes: true
           draft: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
 
-  build-binaries:
-    runs-on: macos-latest
-    needs: [check-version, publish]
-    if: needs.check-version.outputs.changed == 'true'
-    strategy:
-      matrix:
-        include:
-          - target: bun-darwin-arm64
-            name: butter-darwin-arm64
-            archive: tar.gz
-          - target: bun-darwin-x64
-            name: butter-darwin-x64
-            archive: tar.gz
-          - target: bun-linux-x64
-            name: butter-linux-x64
-            archive: tar.gz
-          - target: bun-linux-arm64
-            name: butter-linux-arm64
-            archive: tar.gz
-          - target: bun-windows-x64
-            name: butter-windows-x64
-            archive: zip
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          ref: "v${{ needs.check-version.outputs.version }}"
-      - uses: oven-sh/setup-bun@v2
-
-      - run: bun install
-
-      - name: Compile binary
-        run: |
-          mkdir -p dist
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            bun build --compile --target=${{ matrix.target }} src/cli/index.ts --outfile dist/butter.exe
-          else
-            bun build --compile --target=${{ matrix.target }} src/cli/index.ts --outfile dist/butter
-          fi
-
-      - name: Package archive
-        run: |
-          cd dist
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            zip ../${{ matrix.name }}.zip butter.exe
-          else
-            tar czf ../${{ matrix.name }}.tar.gz butter
-          fi
-
-      - name: Upload to release
-        run: |
-          if [ "${{ matrix.archive }}" = "zip" ]; then
-            gh release upload "v${{ needs.check-version.outputs.version }}" ${{ matrix.name }}.zip --clobber
-          else
-            gh release upload "v${{ needs.check-version.outputs.version }}" ${{ matrix.name }}.tar.gz --clobber
-          fi
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  update-homebrew:
-    runs-on: ubuntu-latest
-    needs: [check-version, build-binaries]
-    if: needs.check-version.outputs.changed == 'true'
-    steps:
-      - name: Download release binaries and compute SHAs
-        id: shas
+      - name: Publish to npm (idempotent)
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
-          BASE="https://github.com/wess/butter/releases/download/v${VERSION}"
-          for target in darwin-arm64 darwin-x64 linux-x64; do
-            FILE="butter-${target}.tar.gz"
-            for i in $(seq 1 30); do
-              if curl -fsSL -o "/tmp/${FILE}" "${BASE}/${FILE}" 2>/dev/null; then
-                echo "${target} available"
-                break
-              fi
-              echo "Waiting for ${target}... ($i/30)"
-              sleep 10
-            done
-            SHA=$(sha256sum "/tmp/${FILE}" | cut -d' ' -f1)
-            KEY=$(echo "${target}" | tr '-' '_')
-            echo "sha_${KEY}=${SHA}" >> "$GITHUB_OUTPUT"
-          done
+          PUBLISHED=$(curl -fsSL "https://registry.npmjs.org/butterframework" 2>/dev/null \
+            | jq -r '.["dist-tags"].latest // ""' || echo "")
+          if [ "$PUBLISHED" = "$VERSION" ]; then
+            echo "Version ${VERSION} already on npm, skipping publish"
+            exit 0
+          fi
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" > ~/.npmrc
+          bun publish --access public
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  update-homebrew:
+    needs: [check-version, release]
+    if: needs.check-version.outputs.changed == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release tarballs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          mkdir -p tarballs
+          gh release download "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --pattern "butter-darwin-arm64.tar.gz" \
+            --pattern "butter-darwin-x64.tar.gz" \
+            --pattern "butter-linux-x64.tar.gz" \
+            --dir tarballs
+
+      - name: Compute SHAs
+        id: shas
+        run: |
+          cd tarballs
+          DARWIN_ARM64=$(sha256sum butter-darwin-arm64.tar.gz | cut -d' ' -f1)
+          DARWIN_X64=$(sha256sum butter-darwin-x64.tar.gz | cut -d' ' -f1)
+          LINUX_X64=$(sha256sum butter-linux-x64.tar.gz | cut -d' ' -f1)
+          echo "sha_darwin_arm64=${DARWIN_ARM64}" >> "$GITHUB_OUTPUT"
+          echo "sha_darwin_x64=${DARWIN_X64}" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_x64=${LINUX_X64}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
         uses: actions/checkout@v5
@@ -159,25 +231,30 @@ jobs:
           path: tap
 
       - name: Update formula
+        env:
+          REPO: ${{ github.repository }}
+          VERSION: ${{ needs.check-version.outputs.version }}
+          SHA_DARWIN_ARM64: ${{ steps.shas.outputs.sha_darwin_arm64 }}
+          SHA_DARWIN_X64: ${{ steps.shas.outputs.sha_darwin_x64 }}
+          SHA_LINUX_X64: ${{ steps.shas.outputs.sha_linux_x64 }}
         run: |
-          VERSION="${{ needs.check-version.outputs.version }}"
-          cat > tap/Formula/butter.rb << 'RUBY'
+          cat > tap/Formula/butter.rb << RUBY
           class Butter < Formula
             desc "Lightweight desktop app framework with native webview and TypeScript"
-            homepage "https://github.com/wess/butter"
-            version "VERSION_PLACEHOLDER"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
 
             if OS.mac?
               if Hardware::CPU.intel?
-                url "https://github.com/wess/butter/releases/download/v#{version}/butter-darwin-x64.tar.gz"
-                sha256 "SHA_DARWIN_X64_PLACEHOLDER"
-              else # ARM
-                url "https://github.com/wess/butter/releases/download/v#{version}/butter-darwin-arm64.tar.gz"
-                sha256 "SHA_DARWIN_ARM64_PLACEHOLDER"
+                url "https://github.com/${REPO}/releases/download/v#{version}/butter-darwin-x64.tar.gz"
+                sha256 "${SHA_DARWIN_X64}"
+              else
+                url "https://github.com/${REPO}/releases/download/v#{version}/butter-darwin-arm64.tar.gz"
+                sha256 "${SHA_DARWIN_ARM64}"
               end
             elsif OS.linux?
-              url "https://github.com/wess/butter/releases/download/v#{version}/butter-linux-x64.tar.gz"
-              sha256 "SHA_LINUX_X64_PLACEHOLDER"
+              url "https://github.com/${REPO}/releases/download/v#{version}/butter-linux-x64.tar.gz"
+              sha256 "${SHA_LINUX_X64}"
             end
 
             def install
@@ -189,10 +266,6 @@ jobs:
             end
           end
           RUBY
-          sed -i "s/VERSION_PLACEHOLDER/${VERSION}/g" tap/Formula/butter.rb
-          sed -i "s/SHA_DARWIN_X64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_x64 }}/g" tap/Formula/butter.rb
-          sed -i "s/SHA_DARWIN_ARM64_PLACEHOLDER/${{ steps.shas.outputs.sha_darwin_arm64 }}/g" tap/Formula/butter.rb
-          sed -i "s/SHA_LINUX_X64_PLACEHOLDER/${{ steps.shas.outputs.sha_linux_x64 }}/g" tap/Formula/butter.rb
 
       - name: Push updated formula
         run: |
@@ -200,5 +273,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add Formula/butter.rb
-          git commit -m "Update butter to v${{ needs.check-version.outputs.version }}"
-          git push
+          if git diff --cached --quiet; then
+            echo "Formula already up to date"
+          else
+            git commit -m "Update butter to v${{ needs.check-version.outputs.version }}"
+            git push
+          fi
