@@ -215,13 +215,15 @@ for (const [name, b64] of Object.entries(ASSETS)) {
   writeFileSync(filePath, Buffer.from(b64, "base64"));
 }
 
+// HANDLEs on Win64 use FFIType.u64 (round-trip as BigInt). Buffer
+// pointers (MapViewOfFile return / UnmapViewOfFile arg) stay FFIType.ptr.
 const k32 = dlopen("kernel32.dll", {
-  CreateFileMappingA: { args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.cstring], returns: FFIType.ptr },
-  MapViewOfFile: { args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64], returns: FFIType.ptr },
+  CreateFileMappingA: { args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.cstring], returns: FFIType.u64 },
+  MapViewOfFile: { args: [FFIType.u64, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64], returns: FFIType.ptr },
   UnmapViewOfFile: { args: [FFIType.ptr], returns: FFIType.i32 },
-  CreateEventA: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.ptr },
-  SetEvent: { args: [FFIType.ptr], returns: FFIType.i32 },
-  CloseHandle: { args: [FFIType.ptr], returns: FFIType.i32 },
+  CreateEventA: { args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.cstring], returns: FFIType.u64 },
+  SetEvent: { args: [FFIType.u64], returns: FFIType.i32 },
+  CloseHandle: { args: [FFIType.u64], returns: FFIType.i32 },
 });
 
 ${ipcPreamble}

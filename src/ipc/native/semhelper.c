@@ -22,5 +22,8 @@ int shm_open_create(const char *name, int oflag, unsigned int mode) {
 }
 
 int shm_open_existing(const char *name, int oflag) {
-    return shm_open(name, oflag);
+    /* Pass mode=0 explicitly: glibc declares shm_open as 3-arg fixed
+       arity; macOS BSD libc declares it variadic so 2-arg compiles there.
+       Mode is ignored unless O_CREAT is set, so 0 is safe for both. */
+    return shm_open(name, oflag, 0);
 }

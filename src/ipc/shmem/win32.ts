@@ -5,21 +5,25 @@ export type SharedRegion = {
   buffer: Uint8Array
   pointer: number
   size: number
-  semToBun: number
-  semToShim: number
+  semToBun: bigint
+  semToShim: bigint
 }
 
+// HANDLE values on Win64 are 64-bit and can have high bits set
+// (e.g. INVALID_HANDLE_VALUE = 0xFFFFFFFFFFFFFFFF), so they must use
+// FFIType.u64 and round-trip as BigInt. Buffer pointers (MapViewOfFile
+// return / UnmapViewOfFile arg) stay as FFIType.ptr so toBuffer() works.
 const kernel32 = dlopen("kernel32.dll", {
   CreateFileMappingA: {
-    args: [FFIType.ptr, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.cstring],
-    returns: FFIType.ptr,
+    args: [FFIType.u64, FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.cstring],
+    returns: FFIType.u64,
   },
   OpenFileMappingA: {
     args: [FFIType.u32, FFIType.i32, FFIType.cstring],
-    returns: FFIType.ptr,
+    returns: FFIType.u64,
   },
   MapViewOfFile: {
-    args: [FFIType.ptr, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64],
+    args: [FFIType.u64, FFIType.u32, FFIType.u32, FFIType.u32, FFIType.u64],
     returns: FFIType.ptr,
   },
   UnmapViewOfFile: {
@@ -28,30 +32,28 @@ const kernel32 = dlopen("kernel32.dll", {
   },
   CreateEventA: {
     args: [FFIType.ptr, FFIType.i32, FFIType.i32, FFIType.cstring],
-    returns: FFIType.ptr,
+    returns: FFIType.u64,
   },
   OpenEventA: {
     args: [FFIType.u32, FFIType.i32, FFIType.cstring],
-    returns: FFIType.ptr,
+    returns: FFIType.u64,
   },
   SetEvent: {
-    args: [FFIType.ptr],
+    args: [FFIType.u64],
     returns: FFIType.i32,
   },
   WaitForSingleObject: {
-    args: [FFIType.ptr, FFIType.u32],
+    args: [FFIType.u64, FFIType.u32],
     returns: FFIType.u32,
   },
   CloseHandle: {
-    args: [FFIType.ptr],
+    args: [FFIType.u64],
     returns: FFIType.i32,
   },
 })
 
 const { symbols: k32 } = kernel32
 
-// INVALID_HANDLE_VALUE is (HANDLE)-1 = 0xFFFFFFFFFFFFFFFF on 64-bit
-// Bun FFI needs this as a pointer via BigInt for correct representation
 const INVALID_HANDLE_VALUE = 0xFFFFFFFFFFFFFFFFn
 const PAGE_READWRITE = 0x04
 const FILE_MAP_ALL_ACCESS = 0x000F001F
@@ -61,10 +63,10 @@ const WAIT_OBJECT_0 = 0x00000000
 
 const cstr = (s: string): Buffer => Buffer.from(s + "\0")
 
-const createMapping = (name: string, size: number): { pointer: number; handle: number } => {
+const createMapping = (name: string, size: number): { pointer: number; handle: bigint } => {
   const handle = k32.CreateFileMappingA(
     INVALID_HANDLE_VALUE, null, PAGE_READWRITE, 0, size, cstr(name),
-  ) as number
+  ) as bigint
   if (!handle) throw new Error(`CreateFileMappingA failed for ${name}`)
 
   const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number
@@ -76,8 +78,8 @@ const createMapping = (name: string, size: number): { pointer: number; handle: n
   return { pointer, handle }
 }
 
-const openMapping = (name: string, size: number): { pointer: number; handle: number } => {
-  const handle = k32.OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, cstr(name)) as number
+const openMapping = (name: string, size: number): { pointer: number; handle: bigint } => {
+  const handle = k32.OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, cstr(name)) as bigint
   if (!handle) throw new Error(`OpenFileMappingA failed for ${name}`)
 
   const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number
@@ -89,16 +91,14 @@ const openMapping = (name: string, size: number): { pointer: number; handle: num
   return { pointer, handle }
 }
 
-// Track handles and pointer for cleanup (UnmapViewOfFile needs the pointer)
-const handles = new Map<string, { map: number; pointer: number; evtTb: number; evtTs: number }>()
+const handles = new Map<string, { map: bigint; pointer: number; evtTb: bigint; evtTs: bigint }>()
 
 export const createSharedRegion = (name: string, size: number): SharedRegion => {
   const { pointer, handle } = createMapping(name, size)
   const buffer = new Uint8Array(toBuffer(pointer, 0, size).buffer, 0, size)
 
-  // Create auto-reset events (bManualReset = FALSE)
-  const evtTb = k32.CreateEventA(null, 0, 0, cstr(`${name}_tb`)) as number
-  const evtTs = k32.CreateEventA(null, 0, 0, cstr(`${name}_ts`)) as number
+  const evtTb = k32.CreateEventA(null, 0, 0, cstr(`${name}_tb`)) as bigint
+  const evtTs = k32.CreateEventA(null, 0, 0, cstr(`${name}_ts`)) as bigint
 
   if (!evtTb || !evtTs) throw new Error(`CreateEventA failed for ${name}`)
 
@@ -111,8 +111,8 @@ export const openSharedRegion = (name: string, size: number): SharedRegion => {
   const { pointer, handle } = openMapping(name, size)
   const buffer = new Uint8Array(toBuffer(pointer, 0, size).buffer, 0, size)
 
-  const evtTb = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_tb`)) as number
-  const evtTs = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_ts`)) as number
+  const evtTb = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_tb`)) as bigint
+  const evtTs = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_ts`)) as bigint
 
   if (!evtTb || !evtTs) throw new Error(`OpenEventA failed for ${name}`)
 
