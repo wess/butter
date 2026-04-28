@@ -1,3 +1,7 @@
+const ensureReturn = (code: string): string => {
+  return /\breturn\b/.test(code) ? code : `return (${code})`
+}
+
 const REPLACER_FN = `
   (k, v) => {
     if (v && typeof v === "object" && v.nodeType === 1) {
@@ -12,7 +16,7 @@ export const wrapEval = (userCode: string, awaitPromise: boolean): string => {
   if (awaitPromise) {
     return `(async () => {
       try {
-        const r = await (async function(){ ${userCode} })()
+        const r = await (async function(){ ${ensureReturn(userCode)} })()
         return JSON.stringify({ result: r }, ${REPLACER_FN})
       } catch (e) {
         return JSON.stringify({ error: String(e) })
@@ -21,7 +25,7 @@ export const wrapEval = (userCode: string, awaitPromise: boolean): string => {
   }
   return `(() => {
     try {
-      const r = (function(){ ${userCode} })()
+      const r = (function(){ ${ensureReturn(userCode)} })()
       return JSON.stringify({ result: r }, ${REPLACER_FN})
     } catch (e) {
       return JSON.stringify({ error: String(e) })
@@ -32,10 +36,14 @@ export const wrapEval = (userCode: string, awaitPromise: boolean): string => {
 export const wrapClick = (selector: string): string => {
   const sel = JSON.stringify(selector)
   return `(() => {
-    const el = document.querySelector(${sel})
-    if (!el) throw new Error("No element matched: " + ${sel})
-    el.click()
-    return { ok: true }
+    try {
+      const el = document.querySelector(${sel})
+      if (!el) throw new Error("No element matched: " + ${sel})
+      el.click()
+      return JSON.stringify({ ok: true })
+    } catch (e) {
+      return JSON.stringify({ error: String(e) })
+    }
   })()`
 }
 
@@ -43,11 +51,15 @@ export const wrapFill = (selector: string, value: string): string => {
   const sel = JSON.stringify(selector)
   const val = JSON.stringify(value)
   return `(() => {
-    const el = document.querySelector(${sel})
-    if (!el) throw new Error("No element matched: " + ${sel})
-    el.value = ${val}
-    el.dispatchEvent(new Event("input", { bubbles: true }))
-    el.dispatchEvent(new Event("change", { bubbles: true }))
-    return { ok: true }
+    try {
+      const el = document.querySelector(${sel})
+      if (!el) throw new Error("No element matched: " + ${sel})
+      el.value = ${val}
+      el.dispatchEvent(new Event("input", { bubbles: true }))
+      el.dispatchEvent(new Event("change", { bubbles: true }))
+      return JSON.stringify({ ok: true })
+    } catch (e) {
+      return JSON.stringify({ error: String(e) })
+    }
   })()`
 }

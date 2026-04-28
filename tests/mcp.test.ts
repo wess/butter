@@ -83,4 +83,65 @@ describe("eval JS wrapping", () => {
   test("wrapped click code is valid JS (parses without error)", () => {
     expect(() => new Function(wrapClick("#nonexistent"))).not.toThrow()
   })
+
+  test("wrapEval auto-returns expression user code", () => {
+    const code = wrapEval("1 + 1", false)
+    const result = JSON.parse(eval(code))
+    expect(result).toEqual({ result: 2 })
+  })
+
+  test("wrapEval respects explicit return statements", () => {
+    const code = wrapEval("const x = 5; return x * 2", false)
+    const result = JSON.parse(eval(code))
+    expect(result).toEqual({ result: 10 })
+  })
+
+  test("wrapClick returns JSON string with ok:true on success", () => {
+    // Mock DOM with single matching element
+    const mockEl = { click: () => {} }
+    ;(globalThis as any).document = { querySelector: () => mockEl }
+    try {
+      const code = wrapClick("#submit")
+      const raw = eval(code)
+      expect(typeof raw).toBe("string")
+      const parsed = JSON.parse(raw)
+      expect(parsed).toEqual({ ok: true })
+    } finally {
+      delete (globalThis as any).document
+    }
+  })
+
+  test("wrapClick returns JSON string with error on missing element", () => {
+    ;(globalThis as any).document = { querySelector: () => null }
+    try {
+      const code = wrapClick("#missing")
+      const raw = eval(code)
+      expect(typeof raw).toBe("string")
+      const parsed = JSON.parse(raw)
+      expect(parsed.error).toContain("No element matched")
+    } finally {
+      delete (globalThis as any).document
+    }
+  })
+
+  test("wrapFill returns JSON string with ok:true on success", () => {
+    const events: string[] = []
+    const mockEl = {
+      value: "",
+      dispatchEvent: (e: Event) => { events.push(e.type); return true },
+    }
+    ;(globalThis as any).document = { querySelector: () => mockEl }
+    ;(globalThis as any).Event = class { constructor(public type: string, public init?: any) {} }
+    try {
+      const code = wrapFill("#email", "test@example.com")
+      const raw = eval(code)
+      const parsed = JSON.parse(raw)
+      expect(parsed).toEqual({ ok: true })
+      expect(mockEl.value).toBe("test@example.com")
+      expect(events).toEqual(["input", "change"])
+    } finally {
+      delete (globalThis as any).document
+      delete (globalThis as any).Event
+    }
+  })
 })
