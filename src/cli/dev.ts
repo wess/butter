@@ -8,6 +8,7 @@ import { loadMenu } from "../menu"
 import { serializeMenu } from "../menu"
 import { runDoctor, printDoctorResults } from "./doctor"
 import { buildNativeExtensions } from "../native/build"
+import { createMcpServer } from "../mcp"
 import type { IpcMessage } from "../types"
 
 const SHM_SIZE = 128 * 1024
@@ -236,6 +237,37 @@ export const runDev = async (projectDir: string): Promise<void> => {
     console.error("Failed to load host code:", err)
   }
 
+  // 7b. Boot MCP dev server
+  const mcpEnabled = config.dev?.mcp?.enabled !== false && process.env.BUTTER_MCP !== "0"
+  const mcpPort = Number(process.env.BUTTER_MCP_PORT ?? config.dev?.mcp?.port ?? 4711)
+  const mcpBufferSize = config.dev?.mcp?.consoleBuffer ?? 1000
+
+  let mcpServer: ReturnType<typeof createMcpServer> | null = null
+  if (mcpEnabled) {
+    mcpServer = createMcpServer({
+      port: mcpPort,
+      consoleBuffer: mcpBufferSize,
+      control: (action, data) => runtime.control(action, data),
+    })
+    try {
+      await mcpServer.start()
+      console.log(`  MCP server listening on http://127.0.0.1:${mcpPort}/mcp`)
+    } catch (err) {
+      console.error(
+        `MCP port ${mcpPort} is already in use. Set dev.mcp.port in butter.yaml ` +
+        `or BUTTER_MCP_PORT env var, or set dev.mcp.enabled: false to disable.`,
+      )
+      process.exit(1)
+    }
+
+    runtime.tap("console:message", (data) => {
+      const m = data as { level: string; text: string }
+      mcpServer?.recordConsole({ level: m.level as "log" | "warn" | "error" | "info", text: m.text })
+    })
+  } else {
+    console.log("  MCP server: disabled")
+  }
+
   // 8. Build allowlist matcher
   const allowlist = config.security?.allowlist ?? null
   const isAllowed = (action: string): boolean => {
@@ -354,15 +386,19 @@ export const runDev = async (projectDir: string): Promise<void> => {
   })
 
   // 10. Cleanup helper
-  const cleanup = () => {
+  const cleanup = async () => {
     running = false
+    if (mcpServer) {
+      try { await mcpServer.stop() } catch {}
+      mcpServer = null
+    }
     watcher.close()
     try { destroySharedRegion(shmName) } catch {}
   }
 
   // 11. Handle shim exit
-  shimProc.exited.then(() => {
-    cleanup()
+  shimProc.exited.then(async () => {
+    await cleanup()
     console.log("\nWindow closed.")
     process.exit(0)
   })
@@ -374,22 +410,22 @@ export const runDev = async (projectDir: string): Promise<void> => {
     if (writeToShim(region.buffer, quitMsg)) {
       signalToShim(region)
     }
-    setTimeout(() => {
-      cleanup()
+    setTimeout(async () => {
+      await cleanup()
       process.exit(0)
     }, 1000)
   })
 
   // 13. Handle unexpected crashes — clean up shared memory
-  process.on("uncaughtException", (err) => {
+  process.on("uncaughtException", async (err) => {
     console.error("Uncaught exception:", err)
-    cleanup()
+    await cleanup()
     process.exit(1)
   })
 
-  process.on("unhandledRejection", (err) => {
+  process.on("unhandledRejection", async (err) => {
     console.error("Unhandled rejection:", err)
-    cleanup()
+    await cleanup()
     process.exit(1)
   })
 }
