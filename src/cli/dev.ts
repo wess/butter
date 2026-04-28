@@ -386,7 +386,10 @@ export const runDev = async (projectDir: string): Promise<void> => {
   })
 
   // 10. Cleanup helper
+  let cleaned = false
   const cleanup = async () => {
+    if (cleaned) return
+    cleaned = true
     running = false
     if (mcpServer) {
       try { await mcpServer.stop() } catch {}
