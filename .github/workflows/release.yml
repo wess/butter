@@ -75,12 +75,9 @@ jobs:
             archive: tar.gz
             ext: ""
             smoke: true
-          - os: macos-13
-            target: bun-darwin-x64
-            name: butter-darwin-x64
-            archive: tar.gz
-            ext: ""
-            smoke: true
+          # darwin-x64 dropped: macos-13 Intel runners are queue-throttled and
+          # Apple stopped selling Intel Macs in 2023. Users on Intel macOS can
+          # build from source via `bun x butterframework@<version> compile`.
           - os: ubuntu-latest
             target: bun-linux-x64
             name: butter-linux-x64
@@ -208,7 +205,6 @@ jobs:
           gh release download "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --pattern "butter-darwin-arm64.tar.gz" \
-            --pattern "butter-darwin-x64.tar.gz" \
             --pattern "butter-linux-x64.tar.gz" \
             --dir tarballs
 
@@ -217,10 +213,8 @@ jobs:
         run: |
           cd tarballs
           DARWIN_ARM64=$(sha256sum butter-darwin-arm64.tar.gz | cut -d' ' -f1)
-          DARWIN_X64=$(sha256sum butter-darwin-x64.tar.gz | cut -d' ' -f1)
           LINUX_X64=$(sha256sum butter-linux-x64.tar.gz | cut -d' ' -f1)
           echo "sha_darwin_arm64=${DARWIN_ARM64}" >> "$GITHUB_OUTPUT"
-          echo "sha_darwin_x64=${DARWIN_X64}" >> "$GITHUB_OUTPUT"
           echo "sha_linux_x64=${LINUX_X64}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
@@ -235,7 +229,6 @@ jobs:
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.check-version.outputs.version }}
           SHA_DARWIN_ARM64: ${{ steps.shas.outputs.sha_darwin_arm64 }}
-          SHA_DARWIN_X64: ${{ steps.shas.outputs.sha_darwin_x64 }}
           SHA_LINUX_X64: ${{ steps.shas.outputs.sha_linux_x64 }}
         run: |
           cat > tap/Formula/butter.rb << RUBY
@@ -244,15 +237,13 @@ jobs:
             homepage "https://github.com/${REPO}"
             version "${VERSION}"
 
-            if OS.mac?
-              if Hardware::CPU.intel?
-                url "https://github.com/${REPO}/releases/download/v#{version}/butter-darwin-x64.tar.gz"
-                sha256 "${SHA_DARWIN_X64}"
-              else
-                url "https://github.com/${REPO}/releases/download/v#{version}/butter-darwin-arm64.tar.gz"
-                sha256 "${SHA_DARWIN_ARM64}"
-              end
-            elsif OS.linux?
+            on_macos do
+              depends_on arch: :arm64
+              url "https://github.com/${REPO}/releases/download/v#{version}/butter-darwin-arm64.tar.gz"
+              sha256 "${SHA_DARWIN_ARM64}"
+            end
+
+            on_linux do
               url "https://github.com/${REPO}/releases/download/v#{version}/butter-linux-x64.tar.gz"
               sha256 "${SHA_LINUX_X64}"
             end
