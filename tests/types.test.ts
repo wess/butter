@@ -176,6 +176,15 @@ describe("createTypedInvoke", () => {
   })
 })
 
+test("Config supports dev.mcp options", () => {
+  const config: Config = {
+    window: { title: "x", width: 100, height: 100 },
+    build: { entry: "x", host: "x" },
+    dev: { mcp: { enabled: true, port: 4711, consoleBuffer: 1000 } },
+  }
+  expect(config.dev?.mcp?.port).toBe(4711)
+})
+
 describe("WindowOptions type shape", () => {
   test("supports all optional fields", () => {
     const opts: WindowOptions = {

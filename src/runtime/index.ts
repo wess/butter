@@ -17,6 +17,7 @@ export type CreateWindowOptions = {
 
 type Runtime = {
   on: (action: string, handler: Handler) => void
+  tap: (action: string, fn: (data: unknown) => void) => void
   send: (action: string, data?: unknown) => void
   dispatch: (action: string, data: unknown) => unknown
   getWindow: () => WindowOptions
@@ -32,6 +33,7 @@ export const createRuntime = (
   initialWindow?: Partial<WindowOptions>,
 ): Runtime => {
   const handlers = new Map<string, Handler>()
+  const taps = new Map<string, ((data: unknown) => void)[]>()
   const outgoing: IpcMessage[] = []
   let nextId = 1
   let nextWindowId = 1
@@ -47,6 +49,10 @@ export const createRuntime = (
       handlers.set(action, handler)
     },
 
+    tap: (action, fn) => {
+      taps.set(action, [...(taps.get(action) ?? []), fn])
+    },
+
     send: (action, data) => {
       outgoing.push({
         id: String(nextId++),
@@ -57,6 +63,9 @@ export const createRuntime = (
     },
 
     dispatch: (action, data) => {
+      for (const t of taps.get(action) ?? []) {
+        try { t(data) } catch { /* taps must not break dispatch */ }
+      }
       const handler = handlers.get(action)
       if (!handler) return undefined
       return handler(data)
@@ -130,6 +139,7 @@ const getRuntime = (): Runtime => {
 }
 
 export const on = (action: string, handler: Handler) => getRuntime().on(action, handler)
+export const tap = (action: string, fn: (data: unknown) => void) => getRuntime().tap(action, fn)
 export const send = (action: string, data?: unknown) => getRuntime().send(action, data)
 export const getWindow = () => getRuntime().getWindow()
 export const setWindow = (opts: Partial<WindowOptions>) => {

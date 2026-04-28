@@ -48,3 +48,49 @@ plugins:
   const config = parseConfig(yaml)
   expect(config.plugins).toEqual(["butter-plugin-dialog", "butter-plugin-tray"])
 })
+
+test("parseConfig parses security.csp and security.allowlist", () => {
+  const yaml = `
+window: { title: "x", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+security:
+  csp: "default-src 'self'"
+  allowlist:
+    - "dialog:*"
+    - "fs:read"
+`
+  const c = parseConfig(yaml)
+  expect(c.security?.csp).toBe("default-src 'self'")
+  expect(c.security?.allowlist).toEqual(["dialog:*", "fs:read"])
+})
+
+test("parseConfig parses splash", () => {
+  const yaml = `
+window: { title: "x", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+splash: src/app/splash.html
+`
+  const c = parseConfig(yaml)
+  expect(c.splash).toBe("src/app/splash.html")
+})
+
+test("parseConfig parses dev.mcp.* with defaults applied", () => {
+  const yaml = `
+window: { title: "x", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+dev:
+  mcp:
+    enabled: false
+`
+  const c = parseConfig(yaml)
+  expect(c.dev?.mcp?.enabled).toBe(false)
+})
+
+test("parseConfig defaults dev to undefined when absent", () => {
+  const yaml = `
+window: { title: "x", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+`
+  const c = parseConfig(yaml)
+  expect(c.dev).toBeUndefined()
+})

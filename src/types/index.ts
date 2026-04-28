@@ -32,12 +32,23 @@ export type SecurityOptions = {
   allowlist?: string[]
 }
 
+export type MCPOptions = {
+  enabled?: boolean
+  port?: number
+  consoleBuffer?: number
+}
+
+export type DevOptions = {
+  mcp?: MCPOptions
+}
+
 export type Config = {
   window: WindowOptions
   build: BuildOptions
   bundle?: BundleOptions
   plugins?: string[]
   security?: SecurityOptions
+  dev?: DevOptions
   splash?: string
 }
 

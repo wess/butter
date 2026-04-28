@@ -42,3 +42,45 @@ test("setWindow updates window state", () => {
   expect(rt.getWindow().title).toBe("New Title")
   expect(rt.getWindow().width).toBe(800)
 })
+
+test("tap registers an observer that runs alongside on() handler", () => {
+  const r = createRuntime()
+  const seen: unknown[] = []
+  r.on("greet", (data) => `hello ${data}`)
+  r.tap("greet", (data) => seen.push(data))
+  const result = r.dispatch("greet", "world")
+  expect(result).toBe("hello world")
+  expect(seen).toEqual(["world"])
+})
+
+test("tap supports multiple observers per action", () => {
+  const r = createRuntime()
+  const a: unknown[] = []
+  const b: unknown[] = []
+  r.tap("e", (d) => a.push(d))
+  r.tap("e", (d) => b.push(d))
+  r.dispatch("e", 1)
+  expect(a).toEqual([1])
+  expect(b).toEqual([1])
+})
+
+test("tap runs even when no on() handler is registered", () => {
+  const r = createRuntime()
+  const seen: unknown[] = []
+  r.tap("orphan", (d) => seen.push(d))
+  r.dispatch("orphan", 42)
+  expect(seen).toEqual([42])
+})
+
+test("tap that throws does not abort dispatch", () => {
+  const r = createRuntime()
+  let handlerCalled = false
+  const seenByB: unknown[] = []
+  r.on("e", () => { handlerCalled = true; return "ok" })
+  r.tap("e", () => { throw new Error("bang") })
+  r.tap("e", (d) => { seenByB.push(d) })
+  const result = r.dispatch("e", 1)
+  expect(handlerCalled).toBe(true)
+  expect(seenByB).toEqual([1])
+  expect(result).toBe("ok")
+})

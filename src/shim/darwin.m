@@ -129,6 +129,21 @@ static NSString *BRIDGE_JS =
     "});"
     "})();";
 
+/* Console wrapper — captures console.log/warn/error/info and posts via the butter bridge */
+static NSString *CONSOLE_WRAPPER_JS =
+    @"(function() {"
+    @"  for (const lvl of ['log','warn','error','info']) {"
+    @"    const orig = console[lvl].bind(console);"
+    @"    console[lvl] = (...args) => {"
+    @"      orig(...args);"
+    @"      const text = args.map(a => typeof a === 'string' ? a : (() => {"
+    @"        try { return JSON.stringify(a); } catch (e) { return String(a); }"
+    @"      })()).join(' ');"
+    @"      try { window.webkit.messageHandlers.butter.postMessage(JSON.stringify({__type:'console', level: lvl, text: text})); } catch (e) {}"
+    @"    };"
+    @"  }"
+    @"})();";
+
 /* ---------- delegate ---------- */
 
 /* ---------- custom URL scheme handler ---------- */
@@ -263,6 +278,25 @@ static id g_globalMonitor = nil;
     NSString *body = message.body;
     const char *utf8 = [body UTF8String];
     if (!utf8) return;
+
+    /* Console capture from injected wrapper */
+    if (strstr(utf8, "\"__type\":\"console\"")) {
+        NSData *jdata = [body dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil];
+        NSString *level = parsed[@"level"] ?: @"log";
+        NSString *text = parsed[@"text"] ?: @"";
+
+        NSDictionary *eventData = @{ @"level": level, @"text": text };
+        NSData *dataJson = [NSJSONSerialization dataWithJSONObject:eventData options:0 error:nil];
+        NSString *dataStr = dataJson
+            ? [[NSString alloc] initWithData:dataJson encoding:NSUTF8StringEncoding]
+            : @"{\"level\":\"log\",\"text\":\"\"}";
+        NSString *evt = [NSString stringWithFormat:
+            @"{\"id\":\"0\",\"type\":\"event\",\"action\":\"console:message\",\"data\":%@}",
+            dataStr];
+        ring_write_tb([evt UTF8String], [evt lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+        return;
+    }
 
     /* Check for context menu request */
     if (strstr(utf8, "\"__contextmenu\"")) {
@@ -880,6 +914,12 @@ static id g_globalMonitor = nil;
         forMainFrameOnly:YES];
     [ucc addUserScript:bridgeScript];
 
+    WKUserScript *consoleScript = [[WKUserScript alloc]
+        initWithSource:CONSOLE_WRAPPER_JS
+        injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+        forMainFrameOnly:YES];
+    [ucc addUserScript:consoleScript];
+
     WKWebView *webview = [[WKWebView alloc] initWithFrame:win.contentView.bounds configuration:config];
     webview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
@@ -1276,6 +1316,52 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
+            if (strstr(msg, "\"mcp:eval\"")) {
+                NSString *msgId = @"0";
+                NSData *jdata = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil];
+                if (parsed[@"id"]) msgId = parsed[@"id"];
+                NSDictionary *evalOpts = parsed[@"data"] ?: @{};
+                NSString *code = evalOpts[@"code"];
+
+                if (!self.webview || !code) {
+                    NSString *resp = [NSString stringWithFormat:
+                        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"mcp:eval\",\"data\":\"{\\\"error\\\":\\\"missing webview or code\\\"}\"}",
+                        msgId];
+                    ring_write_tb([resp UTF8String], [resp lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                    free(msg);
+                    continue;
+                }
+
+                [self.webview evaluateJavaScript:code completionHandler:^(id result, NSError *err) {
+                    NSString *innerJson;
+                    if (err) {
+                        NSDictionary *errDict = @{ @"error": err.localizedDescription ?: @"unknown" };
+                        NSData *errData = [NSJSONSerialization dataWithJSONObject:errDict options:0 error:nil];
+                        innerJson = errData
+                            ? [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding]
+                            : @"{\"error\":\"unknown\"}";
+                    } else if ([result isKindOfClass:[NSString class]]) {
+                        innerJson = (NSString *)result;
+                    } else {
+                        innerJson = @"{\"error\":\"Wrapper did not return a string\"}";
+                    }
+                    if (innerJson.length > 60000) {
+                        innerJson = @"{\"error\":\"Result too large to return through IPC (limit ~60KB).\"}";
+                    }
+                    NSData *escapedData = [NSJSONSerialization dataWithJSONObject:innerJson
+                        options:NSJSONWritingFragmentsAllowed error:nil];
+                    NSString *escaped = escapedData
+                        ? [[NSString alloc] initWithData:escapedData encoding:NSUTF8StringEncoding]
+                        : @"\"[serialization error]\"";
+                    NSString *resp = [NSString stringWithFormat:
+                        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"mcp:eval\",\"data\":%@}",
+                        msgId, escaped];
+                    ring_write_tb([resp UTF8String], [resp lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                }];
+                free(msg);
+                continue;
+            }
             if (strstr(msg, "\"window:print\"")) {
                 if (self.webview) {
                     NSPrintInfo *printInfo = [NSPrintInfo sharedPrintInfo];
@@ -1632,6 +1718,12 @@ int main(int argc, char **argv) {
             injectionTime:WKUserScriptInjectionTimeAtDocumentStart
             forMainFrameOnly:YES];
         [ucc addUserScript:bridgeScript];
+
+        WKUserScript *consoleScript = [[WKUserScript alloc]
+            initWithSource:CONSOLE_WRAPPER_JS
+            injectionTime:WKUserScriptInjectionTimeAtDocumentStart
+            forMainFrameOnly:YES];
+        [ucc addUserScript:consoleScript];
 
         /* Window */
         NSWindow *win = [[NSWindow alloc]
