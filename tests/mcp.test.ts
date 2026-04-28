@@ -5,6 +5,7 @@ import { evalTool } from "../src/mcp/tools/eval"
 import { consoleTool } from "../src/mcp/tools/console"
 import { screenshotTool } from "../src/mcp/tools/screenshot"
 import { clickTool } from "../src/mcp/tools/click"
+import { fillTool } from "../src/mcp/tools/fill"
 import { tmpdir } from "os"
 
 describe("console ring buffer", () => {
@@ -279,5 +280,35 @@ describe("click tool", () => {
     const adv = `button[data-x="' or 1=1 --"]`
     await clickTool.handler({ selector: adv }, control as any)
     expect(captured).toContain(JSON.stringify(adv))
+  })
+})
+
+describe("fill tool", () => {
+  test("sends mcp:eval with fill JS, escapes both selector and value", async () => {
+    let captured = ""
+    const control = (_action: string, data: unknown) => {
+      captured = (data as { code: string }).code
+      return Promise.resolve(JSON.stringify({ ok: true }))
+    }
+    await fillTool.handler({ selector: `input[name="q"]`, value: `"oops"` }, control as any)
+    expect(captured).toContain(JSON.stringify(`input[name="q"]`))
+    expect(captured).toContain(JSON.stringify(`"oops"`))
+    expect(captured).toContain(`new Event("input"`)
+    expect(captured).toContain(`new Event("change"`)
+  })
+
+  test("returns ok:true on success", async () => {
+    const control = () => Promise.resolve(JSON.stringify({ ok: true }))
+    const out = await fillTool.handler({ selector: "#x", value: "v" }, control as any)
+    expect(out.ok).toBe(true)
+    expect(out.error).toBeUndefined()
+  })
+
+  test("returns ok:false with error on missing element", async () => {
+    const control = () =>
+      Promise.resolve(JSON.stringify({ error: 'Error: No element matched: "#x"' }))
+    const out = await fillTool.handler({ selector: "#x", value: "v" }, control as any)
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain("No element matched")
   })
 })
