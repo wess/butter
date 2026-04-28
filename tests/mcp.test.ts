@@ -4,6 +4,7 @@ import { wrapEval, wrapClick, wrapFill } from "../src/mcp/wrap"
 import { evalTool } from "../src/mcp/tools/eval"
 import { consoleTool } from "../src/mcp/tools/console"
 import { screenshotTool } from "../src/mcp/tools/screenshot"
+import { clickTool } from "../src/mcp/tools/click"
 import { tmpdir } from "os"
 
 describe("console ring buffer", () => {
@@ -244,5 +245,39 @@ describe("take_screenshot tool", () => {
     }
     await screenshotTool.handler({}, control as any)
     expect(await Bun.file(path).exists()).toBe(false)
+  })
+})
+
+describe("click tool", () => {
+  test("sends mcp:eval with click JS", async () => {
+    let captured = ""
+    const control = (action: string, data: unknown) => {
+      expect(action).toBe("mcp:eval")
+      captured = (data as { code: string }).code
+      return Promise.resolve(JSON.stringify({ ok: true }))
+    }
+    const out = await clickTool.handler({ selector: "#submit" }, control as any)
+    expect(captured).toContain(JSON.stringify("#submit"))
+    expect(captured).toContain(".click()")
+    expect(out.ok).toBe(true)
+  })
+
+  test("returns ok:false with error when no element matches", async () => {
+    const control = () =>
+      Promise.resolve(JSON.stringify({ error: 'Error: No element matched: "#x"' }))
+    const out = await clickTool.handler({ selector: "#x" }, control as any)
+    expect(out.ok).toBe(false)
+    expect(out.error).toContain("No element matched")
+  })
+
+  test("escapes adversarial selector via JSON.stringify", async () => {
+    let captured = ""
+    const control = (_a: string, d: unknown) => {
+      captured = (d as { code: string }).code
+      return Promise.resolve(JSON.stringify({ ok: true }))
+    }
+    const adv = `button[data-x="' or 1=1 --"]`
+    await clickTool.handler({ selector: adv }, control as any)
+    expect(captured).toContain(JSON.stringify(adv))
   })
 })
