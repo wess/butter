@@ -2,6 +2,7 @@ import { test, expect, describe } from "bun:test"
 import { createConsoleBuffer } from "../src/mcp/console"
 import { wrapEval, wrapClick, wrapFill } from "../src/mcp/wrap"
 import { evalTool } from "../src/mcp/tools/eval"
+import { consoleTool } from "../src/mcp/tools/console"
 
 describe("console ring buffer", () => {
   test("starts empty", () => {
@@ -182,5 +183,34 @@ describe("eval_javascript tool", () => {
     const garbageControl = () => Promise.resolve("this is not json")
     const out = await evalTool.handler({ code: "1" }, garbageControl)
     expect(out.error).toContain("Could not parse shim response")
+  })
+})
+
+describe("list_console_messages tool", () => {
+  test("returns buffered messages", async () => {
+    const buf = createConsoleBuffer(10)
+    buf.push({ level: "log", text: "a" })
+    buf.push({ level: "warn", text: "b" })
+    const out = await consoleTool.handler({}, buf)
+    expect(out.messages).toHaveLength(2)
+    expect(out.next_cursor).toBe(2)
+  })
+
+  test("respects since_cursor", async () => {
+    const buf = createConsoleBuffer(10)
+    buf.push({ level: "log", text: "a" })
+    buf.push({ level: "log", text: "b" })
+    const out = await consoleTool.handler({ since_cursor: 1 }, buf)
+    expect(out.messages).toHaveLength(1)
+    expect(out.messages[0]!.text).toBe("b")
+  })
+
+  test("includes dropped count when cursor is too old", async () => {
+    const buf = createConsoleBuffer(2)
+    buf.push({ level: "log", text: "a" })
+    buf.push({ level: "log", text: "b" })
+    buf.push({ level: "log", text: "c" })
+    const out = await consoleTool.handler({ since_cursor: 0 }, buf)
+    expect(out.dropped).toBeGreaterThan(0)
   })
 })
