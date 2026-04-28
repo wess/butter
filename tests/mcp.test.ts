@@ -1,6 +1,7 @@
 import { test, expect, describe } from "bun:test"
 import { createConsoleBuffer } from "../src/mcp/console"
 import { wrapEval, wrapClick, wrapFill } from "../src/mcp/wrap"
+import { evalTool } from "../src/mcp/tools/eval"
 
 describe("console ring buffer", () => {
   test("starts empty", () => {
@@ -143,5 +144,43 @@ describe("eval JS wrapping", () => {
       delete (globalThis as any).document
       delete (globalThis as any).Event
     }
+  })
+})
+
+describe("eval_javascript tool", () => {
+  const fakeControl = (action: string, data: unknown) => {
+    if (action !== "mcp:eval") throw new Error("unexpected action: " + action)
+    const { code } = data as { code: string }
+    if (code.includes("throw")) {
+      return Promise.resolve(JSON.stringify({ error: "Error: bang" }))
+    }
+    return Promise.resolve(JSON.stringify({ result: 42 }))
+  }
+
+  test("returns parsed result", async () => {
+    const out = await evalTool.handler({ code: "return 42" }, fakeControl)
+    expect(out.result).toBe(42)
+    expect(out.error).toBeUndefined()
+  })
+
+  test("returns error on JS exception", async () => {
+    const out = await evalTool.handler({ code: "throw new Error('bang')" }, fakeControl)
+    expect(out.error).toBe("Error: bang")
+  })
+
+  test("await_promise wraps in async IIFE", async () => {
+    const seen: string[] = []
+    const captureControl = (_a: string, d: unknown) => {
+      seen.push((d as { code: string }).code)
+      return Promise.resolve(JSON.stringify({ result: null }))
+    }
+    await evalTool.handler({ code: "1", await_promise: true }, captureControl)
+    expect(seen[0]!).toContain("async")
+  })
+
+  test("non-JSON response from shim returns error envelope", async () => {
+    const garbageControl = () => Promise.resolve("this is not json")
+    const out = await evalTool.handler({ code: "1" }, garbageControl)
+    expect(out.error).toContain("Could not parse shim response")
   })
 })
