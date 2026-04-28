@@ -1,5 +1,6 @@
 import { test, expect, describe } from "bun:test"
 import { createConsoleBuffer } from "../src/mcp/console"
+import { wrapEval, wrapClick, wrapFill } from "../src/mcp/wrap"
 
 describe("console ring buffer", () => {
   test("starts empty", () => {
@@ -47,5 +48,39 @@ describe("console ring buffer", () => {
     const out = buf.read()
     expect(typeof out.messages[0]!.timestamp).toBe("number")
     expect(out.messages[0]!.timestamp).toBeGreaterThan(0)
+  })
+})
+
+describe("eval JS wrapping", () => {
+  test("wrapEval wraps user code with try/catch and JSON.stringify", () => {
+    const code = wrapEval("1 + 1", false)
+    expect(code).toContain("1 + 1")
+    expect(code).toContain("JSON.stringify")
+    expect(code).toContain("try")
+    expect(code).toContain("catch")
+  })
+
+  test("wrapEval async variant uses await", () => {
+    const code = wrapEval("await fetch('/x')", true)
+    expect(code).toContain("async")
+    expect(code).toContain("await")
+  })
+
+  test("wrapClick escapes selector with JSON.stringify", () => {
+    const code = wrapClick(`button[data-x="' or 1=1 --"]`)
+    expect(code).toContain(JSON.stringify(`button[data-x="' or 1=1 --"]`))
+    expect(code).toContain(".click()")
+  })
+
+  test("wrapFill escapes selector and value", () => {
+    const code = wrapFill("#email", `o'malley"@x.com`)
+    expect(code).toContain(JSON.stringify("#email"))
+    expect(code).toContain(JSON.stringify(`o'malley"@x.com`))
+    expect(code).toContain('dispatchEvent(new Event("input"')
+    expect(code).toContain('dispatchEvent(new Event("change"')
+  })
+
+  test("wrapped click code is valid JS (parses without error)", () => {
+    expect(() => new Function(wrapClick("#nonexistent"))).not.toThrow()
   })
 })
