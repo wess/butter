@@ -3,6 +3,8 @@ import { createConsoleBuffer } from "../src/mcp/console"
 import { wrapEval, wrapClick, wrapFill } from "../src/mcp/wrap"
 import { evalTool } from "../src/mcp/tools/eval"
 import { consoleTool } from "../src/mcp/tools/console"
+import { screenshotTool } from "../src/mcp/tools/screenshot"
+import { tmpdir } from "os"
 
 describe("console ring buffer", () => {
   test("starts empty", () => {
@@ -212,5 +214,35 @@ describe("list_console_messages tool", () => {
     buf.push({ level: "log", text: "c" })
     const out = await consoleTool.handler({ since_cursor: 0 }, buf)
     expect(out.dropped).toBeGreaterThan(0)
+  })
+})
+
+describe("take_screenshot tool", () => {
+  test("calls control with window:screenshot and a temp path", async () => {
+    let captured: { action: string; data: { path: string } } | null = null
+    const control = (action: string, data: unknown) => {
+      captured = { action, data: data as { path: string } }
+      return Bun.write(captured.data.path, new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    }
+    const out = await screenshotTool.handler({}, control as any)
+    expect(captured).not.toBeNull()
+    expect(captured!.action).toBe("window:screenshot")
+    expect(captured!.data.path).toContain(tmpdir())
+    expect(captured!.data.path.endsWith(".png")).toBe(true)
+    expect(out.content[0]!.type).toBe("image")
+    expect(out.content[0]!.mimeType).toBe("image/png")
+    expect(typeof out.content[0]!.data).toBe("string")
+    // Decoded base64 should match the bytes we wrote
+    expect(Buffer.from(out.content[0]!.data, "base64")).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]))
+  })
+
+  test("temp file is cleaned up after read", async () => {
+    let path = ""
+    const control = (_: string, data: unknown) => {
+      path = (data as { path: string }).path
+      return Bun.write(path, new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+    }
+    await screenshotTool.handler({}, control as any)
+    expect(await Bun.file(path).exists()).toBe(false)
   })
 })
