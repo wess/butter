@@ -71,3 +71,16 @@ test("tap runs even when no on() handler is registered", () => {
   r.dispatch("orphan", 42)
   expect(seen).toEqual([42])
 })
+
+test("tap that throws does not abort dispatch", () => {
+  const r = createRuntime()
+  let handlerCalled = false
+  const seenByB: unknown[] = []
+  r.on("e", () => { handlerCalled = true; return "ok" })
+  r.tap("e", () => { throw new Error("bang") })
+  r.tap("e", (d) => { seenByB.push(d) })
+  const result = r.dispatch("e", 1)
+  expect(handlerCalled).toBe(true)
+  expect(seenByB).toEqual([1])
+  expect(result).toBe("ok")
+})

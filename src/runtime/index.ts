@@ -63,7 +63,9 @@ export const createRuntime = (
     },
 
     dispatch: (action, data) => {
-      for (const t of taps.get(action) ?? []) t(data)
+      for (const t of taps.get(action) ?? []) {
+        try { t(data) } catch { /* taps must not break dispatch */ }
+      }
       const handler = handlers.get(action)
       if (!handler) return undefined
       return handler(data)
