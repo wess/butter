@@ -1296,8 +1296,11 @@ static unsigned short keyCodeForString(NSString *key) {
                 [self.webview evaluateJavaScript:code completionHandler:^(id result, NSError *err) {
                     NSString *innerJson;
                     if (err) {
-                        innerJson = [NSString stringWithFormat:@"{\"error\":\"%@\"}",
-                            [err.localizedDescription stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+                        NSDictionary *errDict = @{ @"error": err.localizedDescription ?: @"unknown" };
+                        NSData *errData = [NSJSONSerialization dataWithJSONObject:errDict options:0 error:nil];
+                        innerJson = errData
+                            ? [[NSString alloc] initWithData:errData encoding:NSUTF8StringEncoding]
+                            : @"{\"error\":\"unknown\"}";
                     } else if ([result isKindOfClass:[NSString class]]) {
                         innerJson = (NSString *)result;
                     } else {
@@ -1306,9 +1309,11 @@ static unsigned short keyCodeForString(NSString *key) {
                     if (innerJson.length > 60000) {
                         innerJson = @"{\"error\":\"Result too large to return through IPC (limit ~60KB).\"}";
                     }
-                    NSString *escaped = [[NSString alloc] initWithData:
-                        [NSJSONSerialization dataWithJSONObject:innerJson options:NSJSONWritingFragmentsAllowed error:nil]
-                        encoding:NSUTF8StringEncoding];
+                    NSData *escapedData = [NSJSONSerialization dataWithJSONObject:innerJson
+                        options:NSJSONWritingFragmentsAllowed error:nil];
+                    NSString *escaped = escapedData
+                        ? [[NSString alloc] initWithData:escapedData encoding:NSUTF8StringEncoding]
+                        : @"\"[serialization error]\"";
                     NSString *resp = [NSString stringWithFormat:
                         @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"mcp:eval\",\"data\":%@}",
                         msgId, escaped];
