@@ -1276,6 +1276,47 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
+            if (strstr(msg, "\"mcp:eval\"")) {
+                NSString *msgId = @"0";
+                NSData *jdata = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil];
+                if (parsed[@"id"]) msgId = parsed[@"id"];
+                NSDictionary *evalOpts = parsed[@"data"] ?: @{};
+                NSString *code = evalOpts[@"code"];
+
+                if (!self.webview || !code) {
+                    NSString *resp = [NSString stringWithFormat:
+                        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"mcp:eval\",\"data\":\"{\\\"error\\\":\\\"missing webview or code\\\"}\"}",
+                        msgId];
+                    ring_write_tb([resp UTF8String], [resp lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                    free(msg);
+                    continue;
+                }
+
+                [self.webview evaluateJavaScript:code completionHandler:^(id result, NSError *err) {
+                    NSString *innerJson;
+                    if (err) {
+                        innerJson = [NSString stringWithFormat:@"{\"error\":\"%@\"}",
+                            [err.localizedDescription stringByReplacingOccurrencesOfString:@"\"" withString:@"\\\""]];
+                    } else if ([result isKindOfClass:[NSString class]]) {
+                        innerJson = (NSString *)result;
+                    } else {
+                        innerJson = @"{\"error\":\"Wrapper did not return a string\"}";
+                    }
+                    if (innerJson.length > 60000) {
+                        innerJson = @"{\"error\":\"Result too large to return through IPC (limit ~60KB).\"}";
+                    }
+                    NSString *escaped = [[NSString alloc] initWithData:
+                        [NSJSONSerialization dataWithJSONObject:innerJson options:NSJSONWritingFragmentsAllowed error:nil]
+                        encoding:NSUTF8StringEncoding];
+                    NSString *resp = [NSString stringWithFormat:
+                        @"{\"id\":\"%@\",\"type\":\"response\",\"action\":\"mcp:eval\",\"data\":%@}",
+                        msgId, escaped];
+                    ring_write_tb([resp UTF8String], [resp lengthOfBytesUsingEncoding:NSUTF8StringEncoding]);
+                }];
+                free(msg);
+                continue;
+            }
             if (strstr(msg, "\"window:print\"")) {
                 if (self.webview) {
                     NSPrintInfo *printInfo = [NSPrintInfo sharedPrintInfo];
