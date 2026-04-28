@@ -26,7 +26,7 @@ describe("console ring buffer", () => {
     buf.push({ level: "log", text: "c" })
     const out = buf.read(2)
     expect(out.messages).toHaveLength(1)
-    expect(out.messages[0].text).toBe("c")
+    expect(out.messages[0]!.text).toBe("c")
     expect(out.next_cursor).toBe(3)
   })
 
@@ -45,7 +45,7 @@ describe("console ring buffer", () => {
     const buf = createConsoleBuffer(10)
     buf.push({ level: "log", text: "x" })
     const out = buf.read()
-    expect(typeof out.messages[0].timestamp).toBe("number")
-    expect(out.messages[0].timestamp).toBeGreaterThan(0)
+    expect(typeof out.messages[0]!.timestamp).toBe("number")
+    expect(out.messages[0]!.timestamp).toBeGreaterThan(0)
   })
 })
