@@ -27,6 +27,22 @@ export const parseConfig = (yaml: string): Config => {
         }
       : undefined,
     plugins: raw.plugins ?? undefined,
+    security: raw.security
+      ? {
+          csp: raw.security.csp ?? undefined,
+          allowlist: Array.isArray(raw.security.allowlist) ? raw.security.allowlist : undefined,
+        }
+      : undefined,
+    splash: raw.splash ?? undefined,
+    dev: raw.dev?.mcp
+      ? {
+          mcp: {
+            enabled: raw.dev.mcp.enabled ?? undefined,
+            port: raw.dev.mcp.port ?? undefined,
+            consoleBuffer: raw.dev.mcp.consoleBuffer ?? undefined,
+          },
+        }
+      : undefined,
   }
 }
 
