@@ -56,49 +56,65 @@ const dispatchTool = async (
   }
 }
 
-export const createMcpServer = (opts: CreateMcpServerOptions): McpServer => {
-  const buf = createConsoleBuffer(opts.consoleBuffer)
+// The MCP SDK's WebStandardStreamableHTTPServerTransport throws
+// "Stateless transport cannot be reused" if a transport handles more than
+// one request. In stateless mode (no sessionIdGenerator) the SDK requires
+// a fresh transport — and a fresh Server bound to it — per request, so
+// that's what we do here.
+const buildServer = (
+  control: Control,
+  buf: ConsoleBuffer,
+): Server => {
   const server = new Server(
     { name: "butter-dev", version: "1.0.0" },
     { capabilities: { tools: {} } },
   )
-
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: toolDefs() }))
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const result = await dispatchTool(
       req.params.name,
       req.params.arguments ?? {},
-      opts.control,
+      control,
       buf,
     )
     return { content: [{ type: "text" as const, text: JSON.stringify(result) }] }
   })
+  return server
+}
 
+export const createMcpServer = (opts: CreateMcpServerOptions): McpServer => {
+  const buf = createConsoleBuffer(opts.consoleBuffer)
   let bunServer: ReturnType<typeof Bun.serve> | null = null
-  let transport: WebStandardStreamableHTTPServerTransport | null = null
 
   return {
     start: async () => {
-      transport = new WebStandardStreamableHTTPServerTransport({
-        sessionIdGenerator: undefined,
-      })
-      await server.connect(transport)
       bunServer = Bun.serve({
         hostname: "127.0.0.1",
         port: opts.port,
         async fetch(req: Request) {
-          if (new URL(req.url).pathname.startsWith("/mcp")) {
-            return await transport!.handleRequest(req)
+          if (!new URL(req.url).pathname.startsWith("/mcp")) {
+            return new Response("Not found", { status: 404 })
           }
-          return new Response("Not found", { status: 404 })
+          // Fresh server + transport per request: required by the SDK in
+          // stateless mode; also avoids cross-request message-id collisions.
+          const transport = new WebStandardStreamableHTTPServerTransport({
+            sessionIdGenerator: undefined,
+          })
+          const server = buildServer(opts.control, buf)
+          await server.connect(transport)
+          try {
+            return await transport.handleRequest(req)
+          } finally {
+            // Best-effort teardown; transport is single-use and the Server
+            // owns no persistent state we need to keep across requests.
+            server.close().catch(() => {})
+          }
         },
       })
     },
     stop: async () => {
       bunServer?.stop()
-      await server.close().catch(() => {})
       bunServer = null
-      transport = null
     },
     recordConsole: (msg) => buf.push(msg),
     readConsole: (since) => buf.read(since),

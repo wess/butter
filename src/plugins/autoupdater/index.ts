@@ -34,13 +34,17 @@ const fetchManifest = async (url: string): Promise<UpdateManifest> => {
   return res.json() as Promise<UpdateManifest>
 }
 
+let cachedVersion: string | null = null
+
 const currentVersion = (): string => {
+  if (cachedVersion !== null) return cachedVersion
   try {
     const pkg = require(join(process.cwd(), "package.json"))
-    return pkg.version ?? "0.0.0"
+    cachedVersion = pkg.version ?? "0.0.0"
   } catch {
-    return "0.0.0"
+    cachedVersion = "0.0.0"
   }
+  return cachedVersion
 }
 
 const host = (ctx: HostContext): void => {
@@ -101,10 +105,8 @@ const host = (ctx: HostContext): void => {
 
       if (platform === "darwin") {
         if (ext === "dmg") {
-          // Mount DMG and copy app
+          // Mount DMG and open the volume so the user can drag to Applications.
           await Bun.$`hdiutil attach ${path} -nobrowse -quiet`
-          const mounted = await Bun.$`hdiutil info -plist`.text()
-          // Open the DMG volume so user can drag to Applications
           await Bun.$`open ${path}`
           return { ok: true, action: "opened" }
         } else if (ext === "zip") {

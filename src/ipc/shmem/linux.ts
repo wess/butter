@@ -49,12 +49,31 @@ const libc = dlopen("libc.so.6", {
 const nativeDir = join(dirname(import.meta.path), "..", "native")
 const helperSrc = join(nativeDir, "semhelper.c")
 const helperPath = join(nativeDir, "semhelper.so")
+const helperFpPath = helperPath + ".fp"
+
+const computeHelperFingerprint = async (): Promise<string> => {
+  const src = await Bun.file(helperSrc).arrayBuffer()
+  const hasher = new Bun.CryptoHasher("sha256")
+  hasher.update(new Uint8Array(src))
+  hasher.update("cc -shared -fPIC -lpthread -lrt linux")
+  hasher.update(process.arch)
+  return hasher.digest("hex")
+}
 
 const helperFile = Bun.file(helperPath)
-const srcFile = Bun.file(helperSrc)
-if (!helperFile.size || srcFile.lastModified > helperFile.lastModified) {
-  const { $ } = await import("bun")
-  await $`cc -shared -o ${helperPath} ${helperSrc} -fPIC -lpthread -lrt`.quiet()
+const expectedHelperFp = await computeHelperFingerprint()
+const cachedHelperFp = (await Bun.file(helperFpPath).text().catch(() => "")).trim()
+if (!helperFile.size || cachedHelperFp !== expectedHelperFp) {
+  const proc = Bun.spawn(
+    ["cc", "-shared", "-o", helperPath, helperSrc, "-fPIC", "-lpthread", "-lrt"],
+    { stdout: "pipe", stderr: "pipe" },
+  )
+  const stderr = await new Response(proc.stderr).text()
+  const exit = await proc.exited
+  if (exit !== 0 || !(await Bun.file(helperPath).exists())) {
+    throw new Error(`Failed to build semhelper.so (exit ${exit}):\n${stderr}`)
+  }
+  await Bun.write(helperFpPath, expectedHelperFp)
 }
 
 const helper = dlopen(helperPath, {

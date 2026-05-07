@@ -97,7 +97,15 @@ const host = (ctx: HostContext): void => {
       }
     }
 
-    run()
+    // run() handles its own errors and updates the Download record; this
+    // .catch is a defensive guard in case the function rejects before the
+    // try/catch (e.g. setup throws synchronously).
+    run().catch((err) => {
+      dl.status = "error"
+      dl.error = err instanceof Error ? err.message : String(err)
+      downloads.set(id, dl)
+      ctx.send("download:error", { id, error: dl.error })
+    })
     return { ok: true, id, path: destPath }
   })
 

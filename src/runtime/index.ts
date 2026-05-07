@@ -35,6 +35,8 @@ export const createRuntime = (
   const handlers = new Map<string, Handler>()
   const taps = new Map<string, ((data: unknown) => void)[]>()
   const outgoing: IpcMessage[] = []
+  // Per-runtime so multiple runtimes (or hot reloads) can't collide on ids.
+  const pendingControls = new Map<string, (data: unknown) => void>()
   let nextId = 1
   let nextWindowId = 1
 
@@ -101,15 +103,12 @@ export const createRuntime = (
 
     control: (action, data) => {
       const id = String(nextId++)
-      if (!globalThis.__butterPendingControls) {
-        globalThis.__butterPendingControls = new Map()
-      }
       return new Promise<unknown>((resolve, reject) => {
         const timer = setTimeout(() => {
-          globalThis.__butterPendingControls?.delete(id)
+          pendingControls.delete(id)
           reject(new Error(`Control "${action}" timed out after 30s`))
         }, 30_000)
-        globalThis.__butterPendingControls.set(id, (result: unknown) => {
+        pendingControls.set(id, (result: unknown) => {
           clearTimeout(timer)
           resolve(result)
         })
@@ -118,9 +117,9 @@ export const createRuntime = (
     },
 
     resolveControl: (id, data) => {
-      const resolve = globalThis.__butterPendingControls?.get(id)
+      const resolve = pendingControls.get(id)
       if (resolve) {
-        globalThis.__butterPendingControls.delete(id)
+        pendingControls.delete(id)
         resolve(data)
       }
     },
@@ -130,7 +129,6 @@ export const createRuntime = (
 // Default runtime instance — set by the CLI before importing host code
 declare global {
   var __butterRuntime: Runtime | undefined
-  var __butterPendingControls: Map<string, (data: unknown) => void> | undefined
 }
 
 const getRuntime = (): Runtime => {

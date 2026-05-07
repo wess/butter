@@ -1,5 +1,6 @@
 import { join } from "path"
-import { appendFileSync, mkdirSync, existsSync } from "fs"
+import { mkdirSync, existsSync } from "fs"
+import { appendFile } from "fs/promises"
 import type { Plugin, HostContext } from "../../types"
 
 type LogLevel = "debug" | "info" | "warn" | "error"
@@ -19,10 +20,16 @@ const LOG_LEVELS: Record<LogLevel, number> = {
 
 let logFile: string | null = null
 let minLevel: LogLevel = "info"
+let fileWriteFailed = false
+
+// Serialize file writes so they stay in order even when multiple log calls
+// happen concurrently. Each call appends to the chain rather than racing
+// the underlying fs handle.
+let fileWriteChain: Promise<void> = Promise.resolve()
 
 const formatEntry = (entry: LogEntry): string => {
   const ts = new Date().toISOString()
-  const data = entry.data ? ` ${JSON.stringify(entry.data)}` : ""
+  const data = entry.data !== undefined ? ` ${JSON.stringify(entry.data)}` : ""
   return `[${ts}] [${entry.level.toUpperCase()}] ${entry.message}${data}\n`
 }
 
@@ -38,11 +45,17 @@ const writeLog = (entry: LogEntry): void => {
   }
 
   if (logFile) {
-    try {
-      appendFileSync(logFile, formatted)
-    } catch {
-      // silently fail file writes
-    }
+    const path = logFile
+    fileWriteChain = fileWriteChain.then(() =>
+      appendFile(path, formatted).catch((err) => {
+        if (!fileWriteFailed) {
+          fileWriteFailed = true
+          process.stderr.write(
+            `[logging] failed writing to ${path}: ${err instanceof Error ? err.message : String(err)} (further errors silenced)\n`,
+          )
+        }
+      }),
+    )
   }
 }
 
@@ -53,6 +66,7 @@ const host = (ctx: HostContext): void => {
       const dir = join(opts.file, "..")
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
       logFile = opts.file
+      fileWriteFailed = false
     }
     if (opts?.level && opts.level in LOG_LEVELS) {
       minLevel = opts.level

@@ -1,5 +1,11 @@
 import { test, expect } from "bun:test"
-import { createRingBuffer, writeMessage, readMessage } from "../src/ipc"
+import {
+  createRingBuffer,
+  writeMessage,
+  readMessage,
+  flushWrites,
+  pendingFrameCount,
+} from "../src/ipc"
 import type { IpcMessage } from "../src/types"
 
 test("createRingBuffer creates buffer with correct size", () => {
@@ -13,8 +19,8 @@ test("writeMessage and readMessage roundtrip", () => {
   const ring = createRingBuffer(4096)
   const msg: IpcMessage = { id: "1", type: "invoke", action: "greet", data: "hello" }
 
-  const written = writeMessage(ring, msg)
-  expect(written).toBe(true)
+  writeMessage(ring, msg)
+  expect(pendingFrameCount(ring)).toBe(0)
 
   const result = readMessage(ring)
   expect(result).toEqual(msg)
@@ -42,23 +48,35 @@ test("multiple messages roundtrip in order", () => {
   }
 })
 
-test("writeMessage returns false when buffer is full", () => {
-  const ring = createRingBuffer(64)
-  const bigMsg: IpcMessage = {
+test("messages larger than ring capacity stream through chunked", () => {
+  // 64-byte ring is far too small for the message; chunks will queue
+  // and only flush as the reader drains.
+  const ring = createRingBuffer(256)
+  const big: IpcMessage = {
     id: "1",
     type: "invoke",
-    action: "x".repeat(100),
+    action: "big",
+    data: "x".repeat(10_000),
   }
-  const written = writeMessage(ring, bigMsg)
-  expect(written).toBe(false)
+  writeMessage(ring, big)
+  // Not all frames could fit immediately; queue should be non-empty.
+  expect(pendingFrameCount(ring)).toBeGreaterThan(0)
+
+  // Drain: read what we can, flush more, repeat until reassembly completes.
+  let received: IpcMessage | null = null
+  for (let i = 0; i < 1000 && received === null; i++) {
+    received = readMessage(ring)
+    flushWrites(ring)
+  }
+  expect(received).toEqual(big)
+  expect(pendingFrameCount(ring)).toBe(0)
 })
 
 test("ring buffer wraps around correctly", () => {
   const ring = createRingBuffer(256)
   for (let i = 0; i < 20; i++) {
     const msg: IpcMessage = { id: String(i), type: "invoke", action: "test" }
-    const written = writeMessage(ring, msg)
-    expect(written).toBe(true)
+    writeMessage(ring, msg)
     const result = readMessage(ring)
     expect(result).toEqual(msg)
   }

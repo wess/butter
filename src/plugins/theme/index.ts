@@ -52,7 +52,9 @@ const host = (ctx: HostContext): void => {
     }
   }
 
-  setInterval(poll, 5000)
+  // unref so the polling timer doesn't hold the process open by itself.
+  const handle = setInterval(poll, 5000)
+  handle.unref?.()
 }
 
 const webview = (): string => `

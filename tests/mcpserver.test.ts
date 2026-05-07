@@ -36,4 +36,51 @@ describe("createMcpServer", () => {
     )
     expect(names).toHaveLength(5)
   })
+
+  // Regression: Butter's MCP transport used to crash with
+  // "Stateless transport cannot be reused across requests" on the second
+  // request. A fresh transport is now created per request.
+  test("handles multiple sequential requests on the same instance", async () => {
+    const port = 4700 + Math.floor(Math.random() * 100)
+    const srv = createMcpServer({
+      port,
+      consoleBuffer: 10,
+      control: () => Promise.resolve(""),
+    })
+    await srv.start()
+    try {
+      const headers = {
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      }
+      const body = (id: number) => JSON.stringify({
+        jsonrpc: "2.0",
+        id,
+        method: "tools/list",
+      })
+
+      const r1 = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers,
+        body: body(1),
+      })
+      expect(r1.ok).toBe(true)
+
+      const r2 = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers,
+        body: body(2),
+      })
+      expect(r2.ok).toBe(true)
+
+      const r3 = await fetch(`http://127.0.0.1:${port}/mcp`, {
+        method: "POST",
+        headers,
+        body: body(3),
+      })
+      expect(r3.ok).toBe(true)
+    } finally {
+      await srv.stop()
+    }
+  })
 })

@@ -159,10 +159,6 @@ describe("drainOutgoing", () => {
 })
 
 describe("control", () => {
-  beforeEach(() => {
-    globalThis.__butterPendingControls = undefined
-  })
-
   test("returns a promise", () => {
     const rt = createRuntime()
     const result = rt.control("window:maximize")
@@ -185,27 +181,35 @@ describe("control", () => {
     expect(msgs[0].data).toEqual({ enable: true })
   })
 
-  test("stores the resolve callback in __butterPendingControls", () => {
-    const rt = createRuntime()
-    rt.control("window:minimize")
-    expect(globalThis.__butterPendingControls).toBeDefined()
-    expect(globalThis.__butterPendingControls!.size).toBe(1)
-  })
-
-  test("multiple control calls store multiple pending entries", () => {
+  test("each control call gets a unique id", () => {
     const rt = createRuntime()
     rt.control("window:maximize")
     rt.control("window:minimize")
     rt.control("window:restore")
-    expect(globalThis.__butterPendingControls!.size).toBe(3)
+    const msgs = rt.drainOutgoing()
+    const ids = new Set(msgs.map((m) => m.id))
+    expect(ids.size).toBe(3)
+  })
+
+  test("multiple runtimes don't share pending state", async () => {
+    // Regression: pending controls used to live on globalThis.
+    const rt1 = createRuntime()
+    const rt2 = createRuntime()
+    const p1 = rt1.control("window:maximize")
+    const id1 = rt1.drainOutgoing()[0]!.id
+    rt2.control("window:minimize")
+    // Resolving on rt2 with rt1's id must NOT resolve rt1's promise.
+    rt2.resolveControl(id1, "wrong")
+    let resolved = false
+    p1.then(() => { resolved = true })
+    await new Promise((r) => setTimeout(r, 10))
+    expect(resolved).toBe(false)
+    rt1.resolveControl(id1, "right")
+    expect(await p1).toBe("right")
   })
 })
 
 describe("resolveControl", () => {
-  beforeEach(() => {
-    globalThis.__butterPendingControls = undefined
-  })
-
   test("resolves a pending control promise", async () => {
     const rt = createRuntime()
     const promise = rt.control("window:maximize")
@@ -214,16 +218,6 @@ describe("resolveControl", () => {
     rt.resolveControl(id, { success: true })
     const result = await promise
     expect(result).toEqual({ success: true })
-  })
-
-  test("removes the entry after resolving", async () => {
-    const rt = createRuntime()
-    const promise = rt.control("window:maximize")
-    const msgs = rt.drainOutgoing()
-    const id = msgs[0].id
-    rt.resolveControl(id, "done")
-    await promise
-    expect(globalThis.__butterPendingControls!.has(id)).toBe(false)
   })
 
   test("does nothing for unknown id", () => {
@@ -241,8 +235,7 @@ describe("resolveControl", () => {
     rt.resolveControl(id1, "maximized")
     const result1 = await p1
     expect(result1).toBe("maximized")
-    expect(globalThis.__butterPendingControls!.size).toBe(1)
-    // p2 is still pending
+    // p2 is still pending and resolves independently
     const id2 = msgs[1].id
     rt.resolveControl(id2, "minimized")
     const result2 = await p2
@@ -332,7 +325,6 @@ describe("createRuntime with initialWindow", () => {
 describe("message id uniqueness across operations", () => {
   test("send, createWindow, sendChunk, and control all get unique ids", () => {
     const rt = createRuntime()
-    globalThis.__butterPendingControls = undefined
     rt.send("event:a", null)
     rt.createWindow({ url: "http://localhost" })
     rt.sendChunk("req-1", "chunk")

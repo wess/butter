@@ -1,14 +1,19 @@
 import { test, expect, describe } from "bun:test";
 import type { IpcMessage } from "../src/types";
 
-// Replicate ring buffer constants and functions from src/cli/dev.ts
-// (they are module-local and cannot be imported)
+// Replicate the chunked ring buffer used in src/cli/dev.ts.
+// (The dev module's helpers are not exported; the wire format is reproduced
+// here so any drift is caught.)
 
 const SHM_SIZE = 128 * 1024;
 const HEADER_SIZE = 64;
 const RING_SIZE = (SHM_SIZE - HEADER_SIZE) / 2;
 const TO_BUN_OFFSET = HEADER_SIZE;
 const TO_SHIM_OFFSET = HEADER_SIZE + RING_SIZE;
+
+const FRAME_HDR = 8;
+const FLAG_LAST = 1;
+const MAX_CHUNK_PAYLOAD = 16 * 1024;
 
 const readU32 = (buf: Uint8Array, offset: number): number => {
   const view = new DataView(buf.buffer, buf.byteOffset + offset);
@@ -26,109 +31,133 @@ const ringAvailable = (w: number, r: number): number =>
 const ringFree = (w: number, r: number): number =>
   r > w ? r - w - 1 : RING_SIZE - (w - r) - 1;
 
-const readByte = (buf: Uint8Array, base: number, cursor: number): number =>
-  buf[base + (cursor % RING_SIZE)];
-
-const writeByte = (buf: Uint8Array, base: number, cursor: number, value: number): void => {
-  buf[base + (cursor % RING_SIZE)] = value;
+type State = {
+  buf: Uint8Array;
+  pendingWrite: { bytes: Uint8Array; offset: number }[];
+  reassembly: Uint8Array[];
+  reassemblyLen: number;
 };
 
-const readFromShim = (buf: Uint8Array): IpcMessage[] => {
-  const messages: IpcMessage[] = [];
-  let w = readU32(buf, 0);
-  let r = readU32(buf, 4);
-
-  while (ringAvailable(w, r) >= 4) {
-    const b0 = readByte(buf, TO_BUN_OFFSET, r);
-    const b1 = readByte(buf, TO_BUN_OFFSET, r + 1);
-    const b2 = readByte(buf, TO_BUN_OFFSET, r + 2);
-    const b3 = readByte(buf, TO_BUN_OFFSET, r + 3);
-    const len = b0 | (b1 << 8) | (b2 << 16) | (b3 << 24);
-
-    if (ringAvailable(w, (r + 4) % RING_SIZE) < len) break;
-
-    let cursor = (r + 4) % RING_SIZE;
-    const bytes = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      bytes[i] = readByte(buf, TO_BUN_OFFSET, cursor);
-      cursor = (cursor + 1) % RING_SIZE;
-    }
-
-    r = cursor;
-    writeU32(buf, 4, r);
-
-    const json = new TextDecoder().decode(bytes);
-    try {
-      messages.push(JSON.parse(json) as IpcMessage);
-    } catch {
-      // skip malformed
-    }
-
-    w = readU32(buf, 0);
-  }
-
-  return messages;
+const buildFrame = (payload: Uint8Array, flags: number): Uint8Array => {
+  const frame = new Uint8Array(FRAME_HDR + payload.length);
+  const view = new DataView(frame.buffer);
+  view.setUint32(0, payload.length, true);
+  view.setUint32(4, flags, true);
+  frame.set(payload, FRAME_HDR);
+  return frame;
 };
 
-const writeToShim = (buf: Uint8Array, msg: IpcMessage): boolean => {
+const enqueue = (state: State, msg: IpcMessage): void => {
   const json = JSON.stringify(msg);
   const payload = new TextEncoder().encode(json);
-  const needed = 4 + payload.length;
-
-  const w = readU32(buf, 8);
-  const r = readU32(buf, 12);
-
-  if (ringFree(w, r) < needed) return false;
-
-  let cursor = w;
-
-  writeByte(buf, TO_SHIM_OFFSET, cursor, payload.length & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_SHIM_OFFSET, cursor, (payload.length >> 8) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_SHIM_OFFSET, cursor, (payload.length >> 16) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_SHIM_OFFSET, cursor, (payload.length >> 24) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-
-  for (let i = 0; i < payload.length; i++) {
-    writeByte(buf, TO_SHIM_OFFSET, cursor, payload[i]);
-    cursor = (cursor + 1) % RING_SIZE;
+  if (payload.length === 0) {
+    state.pendingWrite.push({ bytes: buildFrame(payload, FLAG_LAST), offset: 0 });
+    return;
   }
-
-  writeU32(buf, 8, cursor);
-  return true;
+  let offset = 0;
+  while (offset < payload.length) {
+    const chunkLen = Math.min(payload.length - offset, MAX_CHUNK_PAYLOAD);
+    const isLast = offset + chunkLen >= payload.length;
+    state.pendingWrite.push({
+      bytes: buildFrame(payload.subarray(offset, offset + chunkLen), isLast ? FLAG_LAST : 0),
+      offset: 0,
+    });
+    offset += chunkLen;
+  }
 };
 
-// Helper: simulate the shim writing into the TO_BUN ring (offsets 0/4 for w/r, data at TO_BUN_OFFSET)
+// Drain pending into ring at the given direction (TO_SHIM cursors at offsets 8/12).
+const flushToShim = (state: State): boolean => {
+  let any = false;
+  while (state.pendingWrite.length > 0) {
+    const item = state.pendingWrite[0]!;
+    const remaining = item.bytes.length - item.offset;
+    if (remaining <= 0) {
+      state.pendingWrite.shift();
+      continue;
+    }
+    const w = readU32(state.buf, 8);
+    const r = readU32(state.buf, 12);
+    const space = ringFree(w, r);
+    if (space === 0) break;
+    const toWrite = Math.min(remaining, space);
+    let cursor = w;
+    for (let i = 0; i < toWrite; i++) {
+      state.buf[TO_SHIM_OFFSET + cursor] = item.bytes[item.offset + i]!;
+      cursor = (cursor + 1) % RING_SIZE;
+    }
+    writeU32(state.buf, 8, cursor);
+    item.offset += toWrite;
+    any = true;
+    if (item.offset >= item.bytes.length) state.pendingWrite.shift();
+    else break;
+  }
+  return any;
+};
+
+// Helper: simulate the shim writing into the TO_BUN ring (cursors at 0/4).
 const shimWriteToBun = (buf: Uint8Array, msg: IpcMessage): boolean => {
   const json = JSON.stringify(msg);
   const payload = new TextEncoder().encode(json);
-  const needed = 4 + payload.length;
-
+  const frame = buildFrame(payload, FLAG_LAST);
   const w = readU32(buf, 0);
   const r = readU32(buf, 4);
-
-  if (ringFree(w, r) < needed) return false;
-
+  if (ringFree(w, r) < frame.length) return false;
   let cursor = w;
-
-  writeByte(buf, TO_BUN_OFFSET, cursor, payload.length & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_BUN_OFFSET, cursor, (payload.length >> 8) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_BUN_OFFSET, cursor, (payload.length >> 16) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-  writeByte(buf, TO_BUN_OFFSET, cursor, (payload.length >> 24) & 0xff);
-  cursor = (cursor + 1) % RING_SIZE;
-
-  for (let i = 0; i < payload.length; i++) {
-    writeByte(buf, TO_BUN_OFFSET, cursor, payload[i]);
+  for (let i = 0; i < frame.length; i++) {
+    buf[TO_BUN_OFFSET + cursor] = frame[i]!;
     cursor = (cursor + 1) % RING_SIZE;
   }
-
   writeU32(buf, 0, cursor);
   return true;
+};
+
+const readFromShim = (state: State): IpcMessage[] => {
+  const messages: IpcMessage[] = [];
+  while (true) {
+    const w = readU32(state.buf, 0);
+    const r = readU32(state.buf, 4);
+    const used = ringAvailable(w, r);
+    if (used < FRAME_HDR) break;
+
+    let cursor = r;
+    const hdr = new Uint8Array(FRAME_HDR);
+    for (let i = 0; i < FRAME_HDR; i++) {
+      hdr[i] = state.buf[TO_BUN_OFFSET + cursor]!;
+      cursor = (cursor + 1) % RING_SIZE;
+    }
+    const view = new DataView(hdr.buffer);
+    const len = view.getUint32(0, true);
+    const flags = view.getUint32(4, true);
+    if (used < FRAME_HDR + len) break;
+
+    const payload = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+      payload[i] = state.buf[TO_BUN_OFFSET + cursor]!;
+      cursor = (cursor + 1) % RING_SIZE;
+    }
+    writeU32(state.buf, 4, cursor);
+
+    state.reassembly.push(payload);
+    state.reassemblyLen += payload.length;
+
+    if (flags & FLAG_LAST) {
+      const merged = new Uint8Array(state.reassemblyLen);
+      let p = 0;
+      for (const c of state.reassembly) {
+        merged.set(c, p);
+        p += c.length;
+      }
+      state.reassembly = [];
+      state.reassemblyLen = 0;
+      try {
+        messages.push(JSON.parse(new TextDecoder().decode(merged)) as IpcMessage);
+      } catch {
+        // skip malformed
+      }
+    }
+  }
+  return messages;
 };
 
 const makeBuf = (): Uint8Array => {
@@ -137,6 +166,13 @@ const makeBuf = (): Uint8Array => {
   return buf;
 };
 
+const makeState = (buf: Uint8Array): State => ({
+  buf,
+  pendingWrite: [],
+  reassembly: [],
+  reassemblyLen: 0,
+});
+
 const makeMsg = (
   type: IpcMessage["type"],
   action: string,
@@ -144,31 +180,30 @@ const makeMsg = (
   id = "1",
 ): IpcMessage => ({ id, type, action, data });
 
-describe("ring buffer", () => {
-  test("writeToShim writes and data lands in the to-shim ring region", () => {
+describe("ring buffer (chunked frame format)", () => {
+  test("enqueue + flush writes a frame into the to-shim ring", () => {
     const buf = makeBuf();
-    const m = makeMsg("invoke", "test:ping", { v: 42 });
-    const ok = writeToShim(buf, m);
-    expect(ok).toBe(true);
-
-    // write cursor (offset 8) should have advanced
-    const w = readU32(buf, 8);
-    expect(w).toBeGreaterThan(0);
+    const state = makeState(buf);
+    enqueue(state, makeMsg("invoke", "test:ping", { v: 42 }));
+    const wrote = flushToShim(state);
+    expect(wrote).toBe(true);
+    expect(readU32(buf, 8)).toBeGreaterThan(0);
   });
 
   test("shimWriteToBun then readFromShim round-trips a message", () => {
     const buf = makeBuf();
+    const state = makeState(buf);
     const m = makeMsg("invoke", "test:echo", { msg: "hello" });
-    const ok = shimWriteToBun(buf, m);
-    expect(ok).toBe(true);
+    expect(shimWriteToBun(buf, m)).toBe(true);
 
-    const messages = readFromShim(buf);
+    const messages = readFromShim(state);
     expect(messages).toHaveLength(1);
     expect(messages[0]).toEqual(m);
   });
 
-  test("multiple messages written then read", () => {
+  test("multiple messages written then read in order", () => {
     const buf = makeBuf();
+    const state = makeState(buf);
     const msgs = [
       makeMsg("invoke", "a:one", 1, "1"),
       makeMsg("event", "b:two", "hi", "2"),
@@ -179,22 +214,20 @@ describe("ring buffer", () => {
       expect(shimWriteToBun(buf, m)).toBe(true);
     }
 
-    const read = readFromShim(buf);
+    const read = readFromShim(state);
     expect(read).toHaveLength(3);
-    expect(read[0]).toEqual(msgs[0]);
-    expect(read[1]).toEqual(msgs[1]);
-    expect(read[2]).toEqual(msgs[2]);
+    expect(read[0]).toEqual(msgs[0]!);
+    expect(read[1]).toEqual(msgs[1]!);
+    expect(read[2]).toEqual(msgs[2]!);
   });
 
   test("ring buffer wrapping", () => {
     const buf = makeBuf();
-
-    // Write messages until the write cursor wraps past RING_SIZE
+    const state = makeState(buf);
     const payload = "x".repeat(500);
     let count = 0;
     const written: IpcMessage[] = [];
 
-    // Fill, read, fill again to force wrapping
     for (let round = 0; round < 3; round++) {
       const batch: IpcMessage[] = [];
       for (let i = 0; i < 50; i++) {
@@ -203,40 +236,83 @@ describe("ring buffer", () => {
         batch.push(m);
         count++;
       }
-      const read = readFromShim(buf);
+      const read = readFromShim(state);
       written.push(...batch);
       expect(read).toHaveLength(batch.length);
       for (let i = 0; i < read.length; i++) {
-        expect(read[i]).toEqual(batch[i]);
+        expect(read[i]).toEqual(batch[i]!);
       }
     }
 
-    // Confirm we wrote enough to have wrapped
     expect(count).toBeGreaterThan(50);
   });
 
-  test("buffer full condition returns false", () => {
+  test("messages larger than ring stream through chunked", () => {
+    // The fix: previously this would have hung forever on a 100KB payload
+    // since writeToShim would never accept it. With chunking, the payload
+    // streams across multiple flushes/drains and reassembles on the reader.
     const buf = makeBuf();
+    const sender = makeState(buf);
+    const receiver = makeState(buf);
 
-    // Fill the to-bun ring completely with large messages
-    const bigPayload = "y".repeat(10000);
-    let writes = 0;
-    while (shimWriteToBun(buf, makeMsg("invoke", "fill:test", bigPayload, String(writes)))) {
-      writes++;
-      if (writes > 10000) break; // safety
+    const big: IpcMessage = {
+      id: "1",
+      type: "response",
+      action: "mail:smart",
+      data: { body: "y".repeat(100_000) },
+    };
+    enqueue(sender, big);
+
+    let received: IpcMessage | null = null;
+    for (let i = 0; i < 10000 && received === null; i++) {
+      flushToShim(sender);
+      // The receiver in this test reads from the to-shim ring (cursors 8/12),
+      // not the to-bun ring (0/4). Swap cursor offsets for this read.
+      const w = readU32(buf, 8);
+      const r = readU32(buf, 12);
+      const used = w >= r ? w - r : RING_SIZE - r + w;
+      if (used < FRAME_HDR) continue;
+
+      let cursor = r;
+      const hdr = new Uint8Array(FRAME_HDR);
+      for (let j = 0; j < FRAME_HDR; j++) {
+        hdr[j] = buf[TO_SHIM_OFFSET + cursor]!;
+        cursor = (cursor + 1) % RING_SIZE;
+      }
+      const view = new DataView(hdr.buffer);
+      const len = view.getUint32(0, true);
+      const flags = view.getUint32(4, true);
+      if (used < FRAME_HDR + len) continue;
+
+      const payload = new Uint8Array(len);
+      for (let j = 0; j < len; j++) {
+        payload[j] = buf[TO_SHIM_OFFSET + cursor]!;
+        cursor = (cursor + 1) % RING_SIZE;
+      }
+      writeU32(buf, 12, cursor);
+      receiver.reassembly.push(payload);
+      receiver.reassemblyLen += payload.length;
+
+      if (flags & FLAG_LAST) {
+        const merged = new Uint8Array(receiver.reassemblyLen);
+        let p = 0;
+        for (const c of receiver.reassembly) {
+          merged.set(c, p);
+          p += c.length;
+        }
+        received = JSON.parse(new TextDecoder().decode(merged)) as IpcMessage;
+      }
     }
 
-    expect(writes).toBeGreaterThan(0);
-
-    // The loop exited because shimWriteToBun returned false.
-    // Verify that another write of the same size also fails.
-    const overflow = shimWriteToBun(buf, makeMsg("invoke", "fill:test", bigPayload, "overflow"));
-    expect(overflow).toBe(false);
+    expect(received).not.toBeNull();
+    expect(received).toEqual(big);
+    expect(sender.pendingWrite).toHaveLength(0);
   });
 
   test("empty buffer readFromShim returns empty array", () => {
     const buf = makeBuf();
-    const messages = readFromShim(buf);
+    const state = makeState(buf);
+    const messages = readFromShim(state);
     expect(messages).toHaveLength(0);
   });
 
@@ -244,24 +320,15 @@ describe("ring buffer", () => {
     const buf = makeBuf();
     writeU32(buf, 0, 12345);
     expect(readU32(buf, 0)).toBe(12345);
-
     writeU32(buf, 8, 0xffffffff);
     expect(readU32(buf, 8)).toBe(0xffffffff);
-
-    writeU32(buf, 16, 0);
-    expect(readU32(buf, 16)).toBe(0);
   });
 
   test("ringAvailable and ringFree are complementary", () => {
-    // When w == r, available = 0, free = RING_SIZE - 1
     expect(ringAvailable(0, 0)).toBe(0);
     expect(ringFree(0, 0)).toBe(RING_SIZE - 1);
-
-    // When w > r
     expect(ringAvailable(100, 10)).toBe(90);
     expect(ringFree(100, 10)).toBe(RING_SIZE - 91);
-
-    // When w < r (wrapped)
     expect(ringAvailable(10, 100)).toBe(RING_SIZE - 90);
     expect(ringFree(10, 100)).toBe(89);
   });

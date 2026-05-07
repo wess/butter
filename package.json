@@ -1,6 +1,6 @@
 {
   "name": "butterframework",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
   "license": "MIT",
@@ -33,8 +33,10 @@
     "type": "git",
     "url": "https://github.com/wess/butter"
   },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/bun": "latest"
   },
   "peerDependencies": {

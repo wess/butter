@@ -16,12 +16,19 @@
 
 /* ---------- shared memory / IPC constants ---------- */
 
-#define SHM_SIZE       (128 * 1024)
-#define HEADER_SIZE    64
-#define RING_SIZE      ((SHM_SIZE - HEADER_SIZE) / 2)
-#define RING_TB_OFF    HEADER_SIZE
-#define RING_TS_OFF    (HEADER_SIZE + RING_SIZE)
-#define MSG_HDR        4
+#define SHM_SIZE          (128 * 1024)
+#define HEADER_SIZE       64
+#define RING_SIZE         ((SHM_SIZE - HEADER_SIZE) / 2)
+#define RING_TB_OFF       HEADER_SIZE
+#define RING_TS_OFF       (HEADER_SIZE + RING_SIZE)
+
+/* Frame format: [len:u32 LE][flags:u32 LE][payload:bytes]. A logical
+ * message may span multiple frames; the final frame has FLAG_LAST set.
+ * This unblocks payloads larger than RING_SIZE — they stream through
+ * across multiple reader drains. */
+#define FRAME_HDR         8
+#define FLAG_LAST         1u
+#define MAX_CHUNK_PAYLOAD (16 * 1024)
 
 #define TB_WCUR  0
 #define TB_RCUR  4
@@ -34,6 +41,23 @@ static uint8_t *g_shm    = NULL;
 static sem_t   *g_sem_tb = NULL;
 static sem_t   *g_sem_ts = NULL;
 
+/* Outgoing-frame queue: enqueued by ring_write_tb, drained by flush_tb()
+ * as space becomes available in the to-bun ring. */
+typedef struct pending_frame {
+    uint8_t *bytes;            /* full frame: [len][flags][payload]   */
+    uint32_t total;            /* bytes in `bytes`                    */
+    uint32_t offset;           /* how many bytes already written      */
+    struct pending_frame *next;
+} pending_frame_t;
+
+static pending_frame_t *g_tb_head = NULL;
+static pending_frame_t *g_tb_tail = NULL;
+
+/* Reassembly buffer for incoming chunked messages from bun. */
+static uint8_t *g_reasm_buf = NULL;
+static uint32_t g_reasm_len = 0;
+static uint32_t g_reasm_cap = 0;
+
 /* ---------- LE uint32 helpers ---------- */
 
 static uint32_t read_u32(const uint8_t *p) {
@@ -44,49 +68,164 @@ static void write_u32(uint8_t *p, uint32_t v) {
     p[0]=(uint8_t)v; p[1]=(uint8_t)(v>>8); p[2]=(uint8_t)(v>>16); p[3]=(uint8_t)(v>>24);
 }
 
+static uint32_t ring_free(uint32_t w, uint32_t r) {
+    return (r > w) ? (r - w - 1) : (RING_SIZE - (w - r) - 1);
+}
+
+static uint32_t ring_avail(uint32_t w, uint32_t r) {
+    return (w >= r) ? (w - r) : (RING_SIZE - r + w);
+}
+
+/* memcpy-style ring write/read; the slice may straddle the wrap boundary,
+ * in which case it splits into two memcpys. */
+static void ring_write_bytes(uint32_t base_off, uint32_t cursor,
+                             const uint8_t *src, uint32_t n) {
+    uint32_t tail = RING_SIZE - cursor;
+    if (n <= tail) {
+        memcpy(g_shm + base_off + cursor, src, n);
+    } else {
+        memcpy(g_shm + base_off + cursor, src, tail);
+        memcpy(g_shm + base_off, src + tail, n - tail);
+    }
+}
+
+static void ring_read_bytes(uint32_t base_off, uint32_t cursor,
+                            uint8_t *dst, uint32_t n) {
+    uint32_t tail = RING_SIZE - cursor;
+    if (n <= tail) {
+        memcpy(dst, g_shm + base_off + cursor, n);
+    } else {
+        memcpy(dst, g_shm + base_off + cursor, tail);
+        memcpy(dst + tail, g_shm + base_off, n - tail);
+    }
+}
+
 /* ---------- ring buffer write (to-bun) ---------- */
 
 static void buildMenuBar(const char *title, const char *menuJson, id delegate);
 
-static void ring_write_tb(const char *json, size_t len) {
-    uint32_t total = MSG_HDR + (uint32_t)len;
-    uint32_t wcur = read_u32(g_shm + TB_WCUR);
-
-    uint8_t hdr[4];
-    write_u32(hdr, (uint32_t)len);
-    for (uint32_t i = 0; i < MSG_HDR; i++)
-        g_shm[RING_TB_OFF + ((wcur+i) % RING_SIZE)] = hdr[i];
-    for (uint32_t i = 0; i < (uint32_t)len; i++)
-        g_shm[RING_TB_OFF + ((wcur+MSG_HDR+i) % RING_SIZE)] = (uint8_t)json[i];
-
-    write_u32(g_shm + TB_WCUR, (wcur+total) % RING_SIZE);
-    sem_post(g_sem_tb);
+static pending_frame_t *make_frame(const uint8_t *payload, uint32_t len, uint32_t flags) {
+    pending_frame_t *f = (pending_frame_t *)malloc(sizeof(pending_frame_t));
+    f->total = FRAME_HDR + len;
+    f->offset = 0;
+    f->next = NULL;
+    f->bytes = (uint8_t *)malloc(f->total);
+    write_u32(f->bytes, len);
+    write_u32(f->bytes + 4, flags);
+    if (len > 0) memcpy(f->bytes + FRAME_HDR, payload, len);
+    return f;
 }
 
-/* ---------- ring buffer read (to-shim) ---------- */
+static void enqueue_frame(pending_frame_t *f) {
+    if (g_tb_tail) g_tb_tail->next = f;
+    else g_tb_head = f;
+    g_tb_tail = f;
+}
 
+/* Push as many bytes from the pending queue into the to-bun ring as fit.
+ * Returns 1 if anything was written (caller should sem_post). */
+static int flush_tb(void) {
+    int wrote = 0;
+    while (g_tb_head) {
+        pending_frame_t *f = g_tb_head;
+        uint32_t remaining = f->total - f->offset;
+        if (remaining == 0) {
+            g_tb_head = f->next;
+            if (!g_tb_head) g_tb_tail = NULL;
+            free(f->bytes);
+            free(f);
+            continue;
+        }
+        uint32_t w = read_u32(g_shm + TB_WCUR);
+        uint32_t r = read_u32(g_shm + TB_RCUR);
+        uint32_t space = ring_free(w, r);
+        if (space == 0) break;
+        uint32_t to_write = remaining < space ? remaining : space;
+        ring_write_bytes(RING_TB_OFF, w, f->bytes + f->offset, to_write);
+        write_u32(g_shm + TB_WCUR, (w + to_write) % RING_SIZE);
+        f->offset += to_write;
+        wrote = 1;
+        if (f->offset >= f->total) {
+            g_tb_head = f->next;
+            if (!g_tb_head) g_tb_tail = NULL;
+            free(f->bytes);
+            free(f);
+        } else {
+            /* ring full; resume on next flush */
+            break;
+        }
+    }
+    return wrote;
+}
+
+/* Encode a JSON message into one or more frames, queue them, push as many
+ * bytes as fit, and signal bun. Anything that didn't fit stays queued and
+ * is drained by future flush_tb() calls (driven by the runloop tick). */
+static void ring_write_tb(const char *json, size_t len) {
+    uint32_t remaining = (uint32_t)len;
+    uint32_t offset = 0;
+    if (remaining == 0) {
+        enqueue_frame(make_frame(NULL, 0, FLAG_LAST));
+    } else {
+        while (offset < remaining) {
+            uint32_t chunk = (remaining - offset) < MAX_CHUNK_PAYLOAD
+                ? (remaining - offset) : MAX_CHUNK_PAYLOAD;
+            uint32_t is_last = (offset + chunk >= remaining) ? FLAG_LAST : 0;
+            enqueue_frame(make_frame((const uint8_t *)json + offset, chunk, is_last));
+            offset += chunk;
+        }
+    }
+    if (flush_tb()) sem_post(g_sem_tb);
+}
+
+/* ---------- ring buffer read (from bun) ---------- */
+
+/* Ensure g_reasm_buf has room for at least `want` bytes (excluding any
+ * trailing NUL terminator the caller may want to add). */
+static void reasm_reserve(uint32_t want) {
+    if (want <= g_reasm_cap) return;
+    uint32_t cap = g_reasm_cap == 0 ? 4096 : g_reasm_cap * 2;
+    while (cap < want) cap *= 2;
+    g_reasm_buf = (uint8_t *)realloc(g_reasm_buf, cap);
+    g_reasm_cap = cap;
+}
+
+/* Read the next complete logical message, reassembling chunked frames as
+ * needed. Returns a malloc'd, NUL-terminated JSON string, or NULL if no
+ * complete message is available yet. Frame payloads stream straight into
+ * the reassembly buffer — no per-frame heap alloc. */
 static char *ring_read_ts(void) {
-    uint32_t wcur = read_u32(g_shm + TS_WCUR);
-    uint32_t rcur = read_u32(g_shm + TS_RCUR);
-    if (wcur == rcur) return NULL;
+    while (1) {
+        uint32_t wcur = read_u32(g_shm + TS_WCUR);
+        uint32_t rcur = read_u32(g_shm + TS_RCUR);
+        uint32_t avail = ring_avail(wcur, rcur);
+        if (avail < FRAME_HDR) return NULL;
 
-    uint32_t avail = (wcur >= rcur) ? (wcur - rcur) : (RING_SIZE - rcur + wcur);
-    if (avail < MSG_HDR) return NULL;
+        uint8_t hdr[FRAME_HDR];
+        ring_read_bytes(RING_TS_OFF, rcur, hdr, FRAME_HDR);
 
-    uint8_t hdr[4];
-    for (uint32_t i = 0; i < MSG_HDR; i++)
-        hdr[i] = g_shm[RING_TS_OFF + ((rcur+i) % RING_SIZE)];
+        uint32_t len = read_u32(hdr);
+        uint32_t flags = read_u32(hdr + 4);
 
-    uint32_t len = read_u32(hdr);
-    if (avail < MSG_HDR + len) return NULL;
+        if (avail < FRAME_HDR + len) return NULL;
 
-    char *buf = malloc(len+1);
-    for (uint32_t i = 0; i < len; i++)
-        buf[i] = (char)g_shm[RING_TS_OFF + ((rcur+MSG_HDR+i) % RING_SIZE)];
-    buf[len] = '\0';
+        if (len > 0) {
+            reasm_reserve(g_reasm_len + len);
+            ring_read_bytes(RING_TS_OFF, (rcur + FRAME_HDR) % RING_SIZE,
+                            g_reasm_buf + g_reasm_len, len);
+            g_reasm_len += len;
+        }
+        write_u32(g_shm + TS_RCUR, (rcur + FRAME_HDR + len) % RING_SIZE);
 
-    write_u32(g_shm + TS_RCUR, (rcur+MSG_HDR+len) % RING_SIZE);
-    return buf;
+        if (flags & FLAG_LAST) {
+            char *out = (char *)malloc(g_reasm_len + 1);
+            memcpy(out, g_reasm_buf, g_reasm_len);
+            out[g_reasm_len] = '\0';
+            g_reasm_len = 0;
+            return out;
+        }
+        /* not the final chunk — keep accumulating */
+    }
 }
 
 /* ---------- bridge JS ---------- */
@@ -1218,6 +1357,8 @@ static unsigned short keyCodeForString(NSString *key) {
 }
 
 - (void)pollTimer:(NSTimer *)timer {
+    /* Drain any frames that didn't fit in the to-bun ring last write. */
+    if (flush_tb()) sem_post(g_sem_tb);
     char *msg;
     while ((msg = ring_read_ts()) != NULL) {
         NSString *json = [NSString stringWithUTF8String:msg];

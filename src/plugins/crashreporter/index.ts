@@ -30,11 +30,23 @@ const writeCrash = (report: CrashReport): void => {
   process.stderr.write(`[CRASH] ${report.type}: ${report.message}\n`)
 
   if (reportUrl) {
-    fetch(reportUrl, {
+    const url = reportUrl
+    fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(report),
-    }).catch(() => {})
+    }).then(
+      (res) => {
+        if (!res.ok) {
+          process.stderr.write(`[crashreporter] POST ${url} -> ${res.status}\n`)
+        }
+      },
+      (err) => {
+        process.stderr.write(
+          `[crashreporter] POST ${url} failed: ${err instanceof Error ? err.message : String(err)}\n`,
+        )
+      },
+    )
   }
 }
 

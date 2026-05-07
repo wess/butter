@@ -1,4 +1,5 @@
 .claude
+ISSUES.md
 node_modules
 
 # output
@@ -271,6 +272,9 @@ $RECYCLE.BIN/
 .butter/
 *.dylib
 *.so
+*.dylib.fp
+*.so.fp
+*.dll.fp
 
 #LLM
 docs/superpowers

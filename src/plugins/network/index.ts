@@ -1,30 +1,41 @@
 import type { Plugin, HostContext } from "../../types"
-import { execSync } from "child_process"
 
-const checkOnline = (): boolean => {
+// Cross-platform online check: a HEAD request to a small, well-known endpoint.
+// Previously used `execSync("ping ...")` which (a) blocked the event loop,
+// (b) used POSIX-only flags so always reported offline on Windows.
+const PROBE_URL = "https://1.1.1.1/cdn-cgi/trace"
+const PROBE_TIMEOUT_MS = 2000
+
+const checkOnline = async (): Promise<boolean> => {
   try {
-    execSync("ping -c 1 -W 2 1.1.1.1", { stdio: "ignore" })
-    return true
+    const ctrl = AbortSignal.timeout(PROBE_TIMEOUT_MS)
+    const res = await fetch(PROBE_URL, { method: "HEAD", signal: ctrl })
+    return res.ok || res.status === 405 // some endpoints reject HEAD; either way we got bytes back
   } catch {
     return false
   }
 }
 
 const host = (ctx: HostContext): void => {
-  let lastStatus = checkOnline()
+  let lastStatus = false
+  // Seed the first reading without blocking host startup.
+  checkOnline().then((s) => { lastStatus = s }).catch(() => {})
 
-  ctx.on("network:status", () => {
-    return { online: checkOnline() }
+  ctx.on("network:status", async () => {
+    const online = await checkOnline()
+    return { online }
   })
 
-  // Poll every 5 seconds
-  setInterval(() => {
-    const current = checkOnline()
+  // Poll every 5 seconds. unref() so the interval doesn't keep the process
+  // alive on its own.
+  const handle = setInterval(async () => {
+    const current = await checkOnline()
     if (current !== lastStatus) {
       lastStatus = current
       ctx.send("network:change", { online: current })
     }
   }, 5000)
+  handle.unref?.()
 }
 
 const webview = (): string => `
