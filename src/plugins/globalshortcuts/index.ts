@@ -22,10 +22,11 @@ const host = (ctx: HostContext): void => {
 
     registry.set(opts.id, opts)
 
-    // Send control message to shim for native registration
+    // Notify the shim for native registration. Fire-and-forget — the shim
+    // doesn't ack; success is reported asynchronously via shortcut:triggered.
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("shortcut:register", opts)
+      runtime.tell("shortcut:register", opts)
     }
 
     return { ok: true }
@@ -42,7 +43,7 @@ const host = (ctx: HostContext): void => {
 
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("shortcut:unregister", { id })
+      runtime.tell("shortcut:unregister", { id })
     }
 
     return { ok: true }

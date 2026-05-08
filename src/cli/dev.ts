@@ -9,6 +9,7 @@ import { serializeMenu } from "../menu"
 import { runDoctor, printDoctorResults } from "./doctor"
 import { buildNativeExtensions } from "../native/build"
 import { createMcpServer } from "../mcp"
+import { loadHostPlugins, writeWebviewBundle } from "./plugins"
 import type { IpcMessage } from "../types"
 
 const SHM_SIZE = 128 * 1024
@@ -284,6 +285,7 @@ export const runDev = async (projectDir: string): Promise<void> => {
   // 5. Bundle app assets
   console.log("Bundling app...")
   const buildDir = await bundleApp(projectDir, config.build.entry)
+  await writeWebviewBundle(buildDir, config.plugins)
   const htmlPath = join(buildDir, "index.html")
 
   // 6. Create shared memory
@@ -325,6 +327,13 @@ export const runDev = async (projectDir: string): Promise<void> => {
   // 7. Set up runtime and import host code
   const runtime = createRuntime(config.window)
   globalThis.__butterRuntime = runtime
+
+  // 7a. Load plugins BEFORE the user's host code so plugin-registered
+  // handlers exist when host code or the webview start invoking actions.
+  // The user can still register their own handlers afterwards (and override
+  // a plugin's action if they really want to — last writer wins in the
+  // runtime's handler map).
+  loadHostPlugins(config.plugins, runtime)
 
   try {
     const hostPath = join(projectDir, config.build.host)
@@ -458,6 +467,7 @@ export const runDev = async (projectDir: string): Promise<void> => {
       console.log(`File changed: ${filename}, rebuilding...`)
       try {
         await bundleApp(projectDir, config.build.entry)
+        await writeWebviewBundle(buildDir, config.plugins)
         enqueueOutgoing(ipc, makeMsg("control", "reload"))
         if (flushToShim(ipc)) signalToShim(region)
       } catch (err) {

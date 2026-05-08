@@ -26,6 +26,7 @@ type Runtime = {
   createWindow: (opts: CreateWindowOptions) => string
   sendChunk: (requestId: string, data: unknown) => void
   control: (action: string, data?: unknown) => Promise<unknown>
+  tell: (action: string, data?: unknown) => void
   resolveControl: (id: string, data: unknown) => void
 }
 
@@ -116,6 +117,19 @@ export const createRuntime = (
       })
     },
 
+    // Fire-and-forget control message. Use when the shim performs the action
+    // but has nothing meaningful to send back (e.g. dock badge, nav, window
+    // state changes). No pendingControls entry, no 30s timer, no promise to
+    // forget to await — so no unhandled rejection if the shim never acks.
+    tell: (action, data) => {
+      outgoing.push({
+        id: String(nextId++),
+        type: "control",
+        action,
+        data,
+      })
+    },
+
     resolveControl: (id, data) => {
       const resolve = pendingControls.get(id)
       if (resolve) {
@@ -140,20 +154,24 @@ export const on = (action: string, handler: Handler) => getRuntime().on(action, 
 export const tap = (action: string, fn: (data: unknown) => void) => getRuntime().tap(action, fn)
 export const send = (action: string, data?: unknown) => getRuntime().send(action, data)
 export const getWindow = () => getRuntime().getWindow()
+// setWindow updates state synchronously and notifies the shim fire-and-forget.
+// The shim has no response to send back, so we don't await.
 export const setWindow = (opts: Partial<WindowOptions>) => {
   getRuntime().setWindow(opts)
-  return getRuntime().control("window:set", opts)
+  getRuntime().tell("window:set", opts)
 }
 export const createWindow = (opts: CreateWindowOptions) => getRuntime().createWindow(opts)
 export const sendChunk = (requestId: string, data: unknown) => getRuntime().sendChunk(requestId, data)
-export const maximize = () => getRuntime().control("window:maximize")
-export const minimize = () => getRuntime().control("window:minimize")
-export const restore = () => getRuntime().control("window:restore")
-export const fullscreen = (enable: boolean) => getRuntime().control("window:fullscreen", { enable })
-export const setAlwaysOnTop = (enable: boolean) => getRuntime().control("window:alwaysontop", { enable })
-export const closeWindow = (windowId?: string) => getRuntime().control("window:close", { windowId })
-export const setMenu = (menu: unknown) => getRuntime().control("menu:set", menu)
-export const print = () => getRuntime().control("window:print")
+// Fire-and-forget window/menu state changes — shim handlers don't ack.
+export const maximize = () => getRuntime().tell("window:maximize")
+export const minimize = () => getRuntime().tell("window:minimize")
+export const restore = () => getRuntime().tell("window:restore")
+export const fullscreen = (enable: boolean) => getRuntime().tell("window:fullscreen", { enable })
+export const setAlwaysOnTop = (enable: boolean) => getRuntime().tell("window:alwaysontop", { enable })
+export const closeWindow = (windowId?: string) => getRuntime().tell("window:close", { windowId })
+export const setMenu = (menu: unknown) => getRuntime().tell("menu:set", menu)
+export const print = () => getRuntime().tell("window:print")
+export const ready = () => getRuntime().tell("window:ready")
+// These DO get a meaningful response from the shim — keep as control().
 export const screenshot = (path: string) => getRuntime().control("window:screenshot", { path })
-export const ready = () => getRuntime().control("window:ready")
 export const listScreens = () => getRuntime().control("screen:list")

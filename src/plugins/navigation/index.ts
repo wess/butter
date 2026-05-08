@@ -4,7 +4,7 @@ const host = (ctx: HostContext): void => {
   ctx.on("nav:back", () => {
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("nav:back")
+      runtime.tell("nav:back")
     }
     return { ok: true }
   })
@@ -12,7 +12,7 @@ const host = (ctx: HostContext): void => {
   ctx.on("nav:forward", () => {
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("nav:forward")
+      runtime.tell("nav:forward")
     }
     return { ok: true }
   })
@@ -20,7 +20,7 @@ const host = (ctx: HostContext): void => {
   ctx.on("nav:reload", () => {
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("nav:reload")
+      runtime.tell("nav:reload")
     }
     return { ok: true }
   })
@@ -29,7 +29,7 @@ const host = (ctx: HostContext): void => {
     const url = typeof data === "string" ? data : (data as { url: string })?.url ?? ""
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("nav:loadurl", { url })
+      runtime.tell("nav:loadurl", { url })
     }
     return { ok: true }
   })

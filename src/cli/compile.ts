@@ -5,6 +5,7 @@ import { compileShim, shimBinaryPath, shimSourcePath, needsRecompile } from "../
 import { runDoctor, printDoctorResults } from "./doctor"
 import { stripBinary } from "./strip"
 import { parseTarget, assertNativePlatform } from "./crosscompile"
+import { writeWebviewBundle } from "./plugins"
 
 const collectFiles = async (dir: string, base: string = dir): Promise<Record<string, string>> => {
   const entries = await readdir(dir, { withFileTypes: true })
@@ -60,6 +61,10 @@ export const runCompile = async (projectDir: string, args: string[] = []): Promi
     splitting: false,
   })
 
+  // Inject plugin webview bundle into index.html — must run BEFORE
+  // collectFiles() reads the build dir into base64 assets.
+  await writeWebviewBundle(buildDir, config.plugins)
+
   // Assets are served via butter:// custom scheme handler, no inlining needed
 
   // 3. Read shim binary (+ semhelper on POSIX) as base64
@@ -94,14 +99,22 @@ export const runCompile = async (projectDir: string, args: string[] = []): Promi
   // The bootstrap imports host code properly via a generated wrapper
   // that sets up the runtime before importing the user's host module
   const hostWrapperPath = join(butterDir, "hostwrapper.ts")
+  const pluginLoaderPath = join(dirname(import.meta.dir), "cli", "plugins.ts")
+  const pluginNames = config.plugins ?? []
   await Bun.write(hostWrapperPath, `
 import { createRuntime } from "${runtimePath}";
+import { loadHostPlugins } from "${pluginLoaderPath}";
 import type { WindowOptions } from "${join(dirname(import.meta.dir), "types", "index.ts")}";
 
-const config: { window: WindowOptions } = ${JSON.stringify({ window: config.window })};
+const config: { window: WindowOptions; plugins: string[] } = ${JSON.stringify({ window: config.window, plugins: pluginNames })};
 
 const runtime = createRuntime(config.window);
 globalThis.__butterRuntime = runtime;
+
+// Register plugin host handlers BEFORE the user's host code loads, so any
+// invocations from the webview (or from user host code) hit the plugin
+// handlers without races.
+loadHostPlugins(config.plugins, runtime);
 
 // Now import the user's host code — it will call on(), send(), etc. from "butter"
 // which resolve via the runtime's global instance

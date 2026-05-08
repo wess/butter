@@ -15,7 +15,7 @@ const host = (ctx: HostContext): void => {
     const opts = data as TrayOptions
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("tray:set", opts)
+      runtime.tell("tray:set", opts)
     }
     return { ok: true }
   })
@@ -23,7 +23,7 @@ const host = (ctx: HostContext): void => {
   ctx.on("tray:remove", () => {
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("tray:remove")
+      runtime.tell("tray:remove")
     }
     return { ok: true }
   })

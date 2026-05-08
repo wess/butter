@@ -8,7 +8,7 @@ const host = (ctx: HostContext): void => {
     const matchCase = opts?.matchCase ?? false
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("find:start", { text, forward, matchCase })
+      runtime.tell("find:start", { text, forward, matchCase })
     }
     return { ok: true }
   })
@@ -16,7 +16,7 @@ const host = (ctx: HostContext): void => {
   ctx.on("find:stop", () => {
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("find:stop")
+      runtime.tell("find:stop")
     }
     return { ok: true }
   })

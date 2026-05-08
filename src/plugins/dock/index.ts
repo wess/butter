@@ -5,7 +5,7 @@ const host = (ctx: HostContext): void => {
     const text = typeof data === "string" ? data : (data as { text: string })?.text ?? ""
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("dock:setbadge", { text })
+      runtime.tell("dock:setbadge", { text })
     }
     return { ok: true }
   })
@@ -16,7 +16,7 @@ const host = (ctx: HostContext): void => {
       : (data as { type: string })?.type ?? "informational"
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("dock:bounce", { type })
+      runtime.tell("dock:bounce", { type })
     }
     return { ok: true }
   })
@@ -27,7 +27,7 @@ const host = (ctx: HostContext): void => {
       : (data as { progress: number })?.progress ?? 0
     const runtime = globalThis.__butterRuntime
     if (runtime) {
-      runtime.control("dock:setprogress", { progress })
+      runtime.tell("dock:setprogress", { progress })
     }
     return { ok: true }
   })
