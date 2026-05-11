@@ -6,7 +6,7 @@
 
 <p align="center">A lightweight desktop app framework for building native applications with TypeScript, HTML, and CSS. Powered by <a href="https://bun.sh">Bun</a>.</p>
 
-Butter gives you a native window with a webview and a direct IPC bridge between your TypeScript backend and your frontend — no bundled browser engine, no background servers, and a single-file binary output. Write native C or [Moxy](https://github.com/moxylang/moxy) extensions and call them directly from TypeScript.
+Butter gives you a native window with a webview and a direct IPC bridge between your TypeScript backend and your frontend — no bundled browser engine, no background servers, and a single-file binary output. Write native C, [Moxy](https://github.com/moxylang/moxy), Rust, or Zig extensions and call them directly from TypeScript.
 
 ## Why Butter?
 
@@ -14,13 +14,13 @@ Butter gives you a native window with a webview and a direct IPC bridge between 
 |---|----------|-------|--------|
 | Runtime | Chromium (~150MB) | System webview | System webview |
 | Backend | Node.js | Rust | Bun (TypeScript) |
-| Native extensions | N/A | Rust | C / [Moxy](https://github.com/moxylang/moxy) |
+| Native extensions | N/A | Rust | C / [Moxy](https://github.com/moxylang/moxy) / Rust / Zig |
 | Binary size | ~200MB | ~5MB | ~60MB |
 | IPC | JSON over IPC pipe | JSON commands | Shared memory ring buffer |
-| Language | JS/TS | Rust + JS/TS | TypeScript + C/Moxy |
+| Language | JS/TS | Rust + JS/TS | TypeScript + C/Moxy/Rust/Zig |
 | Build tool | webpack/vite | Cargo | Bun |
 
-Butter's sweet spot: you want native desktop apps with TypeScript on both sides, native performance where you need it via C/Moxy, and zero configuration.
+Butter's sweet spot: you want native desktop apps with TypeScript on both sides, native performance where you need it via C/Moxy/Rust/Zig, and zero configuration.
 
 ## Installation
 
@@ -89,8 +89,8 @@ Butter runs two processes:
 |  import { on } from      |     |  WebView2 (Windows)      |
 |    "butter"              |     |                          |
 |                          |     |  Your HTML/CSS/JS        |
-|  C/Moxy native modules   |     |  runs here               |
-|  via FFI                 |     |                          |
+|  Native modules via FFI: |     |  runs here               |
+|  C / Moxy / Rust / Zig   |     |                          |
 +--------------------------+     +--------------------------+
          Shared Memory Ring Buffer
 ```
@@ -98,7 +98,7 @@ Butter runs two processes:
 - **No web server** — assets served via `butter://` custom protocol
 - **No bundled browser** — uses the OS native webview
 - **Shared memory IPC** — fast communication via ring buffers
-- **Native extensions** — write C or Moxy, auto-compiled and bound via FFI
+- **Native extensions** — write C, Moxy, Rust, or Zig; auto-compiled and bound via FFI
 - **Single binary** — `butter compile` produces one executable
 
 ## Project Structure
@@ -113,8 +113,12 @@ myapp/
     host/
       index.ts         # Backend TypeScript (runs in Bun)
       menu.ts          # Native menu definition (optional)
-    native/            # C/Moxy native extensions (optional)
-      math.mxy         # Compiled to shared lib, auto-bound via FFI
+    native/            # Native extensions, optional. Drop in any of:
+      math.mxy         #   .mxy   — Moxy
+      hash.c           #   .c     — C
+      fib.zig          #   .zig   — Zig
+      mathrs.rs        #   .rs    — single-file Rust
+      hashlib/         #   <dir>/Cargo.toml — multi-file Rust project
     env.d.ts           # Type declarations for webview globals
   butter.yaml          # Configuration
   package.json
@@ -223,9 +227,17 @@ const action = await butter.contextMenu([
 
 The `butter` global is automatically injected into the webview. TypeScript types are provided via `src/env.d.ts`.
 
-### Native Extensions (C / Moxy)
+### Native Extensions (C / Moxy / Rust / Zig)
 
-Write performance-critical code in C or [Moxy](https://github.com/moxylang/moxy) and call it directly from TypeScript. Butter auto-compiles and generates FFI bindings.
+Write performance-critical code in **C**, **[Moxy](https://github.com/moxylang/moxy)**, **Rust**, or **Zig** and call it directly from TypeScript. Drop a source file (or a Cargo project) into `src/native/` and Butter auto-compiles it and generates FFI bindings — everything crosses the C ABI so the resulting binding is identical from the caller's side.
+
+| Layout | Build |
+|---|---|
+| `src/native/foo.c` | clang / cc / cl.exe |
+| `src/native/foo.mxy` | moxy → C → compiler |
+| `src/native/foo.rs` | `rustc --crate-type cdylib --edition 2021 -C opt-level=3` |
+| `src/native/foo.zig` | `zig build-lib -dynamic -OReleaseFast` |
+| `src/native/foo/Cargo.toml` | `cargo build --release` (must set `crate-type = ["cdylib"]`) |
 
 **Moxy** (`src/native/math.mxy`):
 
@@ -258,6 +270,39 @@ BUTTER_EXPORT(
 )
 ```
 
+**Rust** (`src/native/mathrs.rs`):
+
+```rust
+// @butter-export
+#[no_mangle]
+pub extern "C" fn add(a: i32, b: i32) -> i32 {
+    a + b
+}
+
+// @butter-export
+#[no_mangle]
+pub extern "C" fn fast_hash(input: *const u8, len: i32) -> i32 {
+    let mut h: i32 = 0;
+    unsafe {
+        for i in 0..len {
+            h = h.wrapping_mul(31).wrapping_add(*input.offset(i as isize) as i32);
+        }
+    }
+    h
+}
+```
+
+For multi-file Rust projects with crate dependencies, point a directory at a `Cargo.toml` instead — Butter runs `cargo build --release` and uses the directory name as the module name.
+
+**Zig** (`src/native/fib.zig`):
+
+```zig
+// @butter-export
+export fn fib(n: i32) i32 {
+    return if (n < 2) n else fib(n - 1) + fib(n - 2);
+}
+```
+
 **Use from TypeScript:**
 
 ```ts
@@ -268,9 +313,15 @@ const fib = math.fibonacci(20)  // 6765 — computed in native code
 
 const crypto = await native("crypto")
 const hash = crypto.fast_hash("hello", 5)
+
+const mathrs = await native("mathrs")
+const sum = mathrs.add(2, 3)  // 5 — computed in Rust
+
+const fibZig = await native("fib")
+const f10 = fibZig.fib(10)    // 55 — computed in Zig
 ```
 
-Butter parses `BUTTER_EXPORT()` blocks (C) or `// @butter-export` annotations (Moxy), extracts function signatures, compiles to a shared library, and generates typed TypeScript bindings. Recompiles only when source changes.
+Butter parses the appropriate marker for each language — `BUTTER_EXPORT()` blocks in C, `// @butter-export` annotations above functions in Moxy, Rust, and Zig — extracts the signatures, compiles to a shared library, and generates typed TypeScript bindings. A SHA-256 fingerprint of the source + compiler flags + platform is cached alongside each library; rebuilds only run when something actually changed. `butter doctor` reports Rust and Zig as **optional** toolchains, so missing them never fails the doctor unless you actually have `.rs` or `.zig` sources.
 
 ### Menus
 
@@ -351,7 +402,7 @@ butter doctor        Check platform prerequisites
 ### `butter dev`
 
 Starts development mode:
-1. Compiles native extensions (C/Moxy) if present
+1. Compiles native extensions (C / Moxy / Rust / Zig) if present
 2. Compiles the native shim (cached)
 3. Bundles frontend assets
 4. Opens a native window with DevTools enabled (right-click to inspect)
@@ -377,9 +428,11 @@ Creates an OS-native app package:
 ```
 $ butter doctor
 
-  Bun ................. v1.3.11
-  Compiler ............ clang 22.1.1
-  Webview ............. WKWebView (macOS)
+  Bun ........................... v1.3.13
+  Compiler ...................... clang 17.0.0
+  Webview ....................... WKWebView (macOS)
+  Rust (optional) ............... rustc 1.95.0, cargo 1.95.0
+  Zig (optional) ................ zig 0.14.0
 
   All checks passed.
 ```
@@ -489,7 +542,8 @@ powershell -c "irm bun.sh/install.ps1 | iex"
 
 ```
 App Code (TS/HTML/CSS)          You write this
-Native Extensions (C/Moxy)      Optional, auto-compiled
+Native Extensions               Optional, auto-compiled
+(C / Moxy / Rust / Zig)
 Butter Runtime (Bun/TS)         CLI, IPC bridge, API, FFI bindings
 Platform Shim (ObjC/C)          Native window + webview
 ```

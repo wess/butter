@@ -154,15 +154,17 @@ None.
 
 **Checks performed**
 
-| Check | macOS | Linux | Windows |
-|---|---|---|---|
-| Bun | `Bun.version` | `Bun.version` | `Bun.version` |
-| Compiler | `clang --version` | `cc -v` | `cl` or `gcc --version` |
-| WebView | WKWebView (always available) | `pkg-config --exists webkit2gtk-4.1` | WebView2 (registry check) |
+| Check | macOS | Linux | Windows | Required? |
+|---|---|---|---|---|
+| Bun | `Bun.version` | `Bun.version` | `Bun.version` | yes |
+| Compiler | `clang --version` | `cc -v` | `cl` or `gcc --version` | yes |
+| WebView | WKWebView (always available) | `pkg-config --exists webkit2gtk-4.1` | WebView2 (registry check) | yes |
+| Rust | `rustc --version` + `cargo --version` | same | same | optional |
+| Zig | `zig version` | same | same | optional |
 
 **Output**
 
-Each check prints a status line. If any check fails, a remediation hint is printed.
+Each check prints a status line. Required checks fail the command on error; **optional** checks (Rust, Zig) report status but do not fail the doctor when missing — they're only needed when your project has `.rs` or `.zig` sources to build.
 
 **Remediation hints**
 
@@ -174,14 +176,18 @@ Each check prints a status line. If any check fails, a remediation hint is print
 | WebKitGTK missing (Linux) | `sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev` |
 | Compiler not found (Windows) | Install Visual Studio Build Tools (MSVC) or MinGW-GCC |
 | WebView2 missing (Windows) | Install from https://developer.microsoft.com/en-us/microsoft-edge/webview2/ |
+| Rust not installed (optional) | https://www.rust-lang.org/tools/install |
+| Zig not installed (optional) | https://ziglang.org/download |
 
 **Example**
 
 ```sh
 butter doctor
-  Bun ................ v1.2.0
-  Compiler ........... clang 16.0.0
-  Webview ............ WKWebView (macOS)
+  Bun ........................... v1.3.13
+  Compiler ...................... clang 17.0.0
+  Webview ....................... WKWebView (macOS)
+  Rust (optional) ............... rustc 1.95.0, cargo 1.95.0
+  Zig (optional) ................ zig 0.14.0
 
   All checks passed.
 ```

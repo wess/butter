@@ -1,6 +1,14 @@
 /*
- * Parses C/Moxy source files to extract function signatures from BUTTER_EXPORT blocks.
+ * Parses native-extension source files (C, Moxy, Rust, Zig) to extract function
+ * signatures from BUTTER_EXPORT blocks or // @butter-export annotations.
  * Generates TypeScript FFI binding code for use with bun:ffi.
+ *
+ * Public entry points:
+ *   extractExports(source)       — C and Moxy (BUTTER_EXPORT + // @butter-export)
+ *   extractRustExports(source)   — Rust (// @butter-export above pub extern "C" fn)
+ *   extractZigExports(source)    — Zig  (// @butter-export above export fn)
+ *   generateBindings(name, fns)  — same bindings file for all four languages
+ *                                  (everything crosses the C ABI in the end)
  */
 
 export type FfiParam = {
@@ -184,6 +192,215 @@ export const extractExports = (source: string): FfiFunction[] => {
 
   return functions
 }
+
+// ---------- Rust ----------
+
+const RUST_TO_FFI: Record<string, string> = {
+  i8: "FFIType.i8",
+  i16: "FFIType.i16",
+  i32: "FFIType.i32",
+  i64: "FFIType.i64",
+  u8: "FFIType.u8",
+  u16: "FFIType.u16",
+  u32: "FFIType.u32",
+  u64: "FFIType.u64",
+  f32: "FFIType.f32",
+  f64: "FFIType.f64",
+  bool: "FFIType.bool",
+  usize: "FFIType.u64",
+  isize: "FFIType.i64",
+  c_char: "FFIType.i8",
+  c_schar: "FFIType.i8",
+  c_uchar: "FFIType.u8",
+  c_short: "FFIType.i16",
+  c_ushort: "FFIType.u16",
+  c_int: "FFIType.i32",
+  c_uint: "FFIType.u32",
+  c_long: "FFIType.i64",
+  c_ulong: "FFIType.u64",
+  c_float: "FFIType.f32",
+  c_double: "FFIType.f64",
+  c_void: "FFIType.void",
+}
+
+const RUST_TO_TS: Record<string, string> = {
+  i8: "number", i16: "number", i32: "number", i64: "number",
+  u8: "number", u16: "number", u32: "number", u64: "number",
+  f32: "number", f64: "number",
+  bool: "boolean",
+  usize: "number", isize: "number",
+  c_char: "number", c_schar: "number", c_uchar: "number",
+  c_short: "number", c_ushort: "number",
+  c_int: "number", c_uint: "number",
+  c_long: "number", c_ulong: "number",
+  c_float: "number", c_double: "number",
+}
+
+const stripRustPath = (raw: string): string =>
+  raw.replace(/(?:std::os::raw::|core::ffi::|std::ffi::|libc::)/g, "").trim()
+
+const resolveRustType = (raw: string): { ctype: string; ffitype: string; tstype: string } => {
+  const trimmed = stripRustPath(raw)
+  if (trimmed === "" || trimmed === "()") {
+    return { ctype: "()", ffitype: "FFIType.void", tstype: "void" }
+  }
+  // Null-terminated byte pointers → cstring (matches the bindings-side
+  // `Buffer.from(s + "\0")` trick that already works for C/Moxy).
+  if (/^\*\s*(?:const|mut)\s+(?:c_char|u8|i8)\b/.test(trimmed)) {
+    return { ctype: trimmed, ffitype: "FFIType.cstring", tstype: "string" }
+  }
+  if (trimmed.startsWith("*")) {
+    return { ctype: trimmed, ffitype: "FFIType.ptr", tstype: "number" }
+  }
+  const ffi = RUST_TO_FFI[trimmed]
+  if (ffi) return { ctype: trimmed, ffitype: ffi, tstype: RUST_TO_TS[trimmed] ?? "number" }
+  // Unknown type — fall through as a raw pointer. dlopen will surface a real
+  // error at link time if the symbol/ABI mismatch matters.
+  return { ctype: trimmed, ffitype: "FFIType.ptr", tstype: "number" }
+}
+
+const parseRustSignature = (sig: string): FfiFunction | null => {
+  // Capture: fn name(params) [-> ret]
+  // Leading attributes (#[...]), `pub`, `extern "C"` are tolerated by anchoring
+  // on the `fn` keyword rather than the line start.
+  const m = sig.match(/\bfn\s+(\w+)\s*\(([^)]*)\)\s*(?:->\s*([^{;]+?))?\s*$/)
+  if (!m) return null
+  const [, name, rawParams, rawRet] = m
+  const ret = resolveRustType(rawRet ?? "()")
+  const params: FfiParam[] = []
+  if (rawParams.trim()) {
+    for (const param of rawParams.split(",")) {
+      const p = param.trim()
+      if (!p) continue
+      const colon = p.indexOf(":")
+      if (colon === -1) continue
+      const pname = p.substring(0, colon).trim()
+      const ptype = p.substring(colon + 1).trim()
+      const resolved = resolveRustType(ptype)
+      params.push({ name: pname, ctype: resolved.ctype, ffitype: resolved.ffitype })
+    }
+  }
+  return { name, returnType: ret.tstype, ffiReturn: ret.ffitype, params }
+}
+
+export const extractRustExports = (source: string): FfiFunction[] => {
+  const functions: FfiFunction[] = []
+  const lines = source.split("\n")
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== "// @butter-export") continue
+    // Collect lines after the marker until we reach `{` (function body) or `;`
+    // (extern declaration). Attributes and qualifiers span multiple lines in
+    // typical Rust style, so we accumulate until the signature is complete.
+    let buf = ""
+    for (let j = i + 1; j < lines.length; j++) {
+      const stripped = lines[j].split("//")[0]
+      buf += " " + stripped
+      const terminator = buf.search(/[{;]/)
+      if (terminator !== -1) {
+        const sig = buf.substring(0, terminator).trim()
+        if (/\bfn\s+\w+/.test(sig)) {
+          const fn = parseRustSignature(sig)
+          if (fn) functions.push(fn)
+        }
+        break
+      }
+    }
+  }
+  return functions
+}
+
+// ---------- Zig ----------
+
+const ZIG_TO_FFI: Record<string, string> = {
+  i8: "FFIType.i8", i16: "FFIType.i16", i32: "FFIType.i32", i64: "FFIType.i64",
+  u8: "FFIType.u8", u16: "FFIType.u16", u32: "FFIType.u32", u64: "FFIType.u64",
+  f32: "FFIType.f32", f64: "FFIType.f64",
+  bool: "FFIType.bool", void: "FFIType.void",
+  usize: "FFIType.u64", isize: "FFIType.i64",
+  c_char: "FFIType.i8", c_schar: "FFIType.i8", c_uchar: "FFIType.u8",
+  c_short: "FFIType.i16", c_ushort: "FFIType.u16",
+  c_int: "FFIType.i32", c_uint: "FFIType.u32",
+  c_long: "FFIType.i64", c_ulong: "FFIType.u64",
+}
+
+const ZIG_TO_TS: Record<string, string> = {
+  i8: "number", i16: "number", i32: "number", i64: "number",
+  u8: "number", u16: "number", u32: "number", u64: "number",
+  f32: "number", f64: "number",
+  bool: "boolean", void: "void",
+  usize: "number", isize: "number",
+  c_char: "number", c_schar: "number", c_uchar: "number",
+  c_short: "number", c_ushort: "number",
+  c_int: "number", c_uint: "number",
+  c_long: "number", c_ulong: "number",
+}
+
+const resolveZigType = (raw: string): { ctype: string; ffitype: string; tstype: string } => {
+  const trimmed = raw.trim()
+  // Null-terminated byte pointers: [*:0]const u8, [*:0]u8 — Zig's idiomatic
+  // C-string form. Falls back to plain pointer for everything else.
+  if (/^\[\*:0\]\s*(?:const\s+)?u8\b/.test(trimmed)) {
+    return { ctype: trimmed, ffitype: "FFIType.cstring", tstype: "string" }
+  }
+  if (
+    trimmed.startsWith("*") ||
+    trimmed.startsWith("[*") ||
+    trimmed.startsWith("?*") ||
+    trimmed.startsWith("?[")
+  ) {
+    return { ctype: trimmed, ffitype: "FFIType.ptr", tstype: "number" }
+  }
+  const ffi = ZIG_TO_FFI[trimmed]
+  if (ffi) return { ctype: trimmed, ffitype: ffi, tstype: ZIG_TO_TS[trimmed] ?? "number" }
+  return { ctype: trimmed, ffitype: "FFIType.ptr", tstype: "number" }
+}
+
+const parseZigSignature = (sig: string): FfiFunction | null => {
+  // Capture: fn name(params) ret_type   (Zig has no -> before the return type)
+  const m = sig.match(/\bfn\s+(\w+)\s*\(([^)]*)\)\s+(.+?)\s*$/)
+  if (!m) return null
+  const [, name, rawParams, rawRet] = m
+  const ret = resolveZigType(rawRet)
+  const params: FfiParam[] = []
+  if (rawParams.trim()) {
+    for (const param of rawParams.split(",")) {
+      const p = param.trim()
+      if (!p) continue
+      const colon = p.indexOf(":")
+      if (colon === -1) continue
+      const pname = p.substring(0, colon).trim()
+      const ptype = p.substring(colon + 1).trim()
+      const resolved = resolveZigType(ptype)
+      params.push({ name: pname, ctype: resolved.ctype, ffitype: resolved.ffitype })
+    }
+  }
+  return { name, returnType: ret.tstype, ffiReturn: ret.ffitype, params }
+}
+
+export const extractZigExports = (source: string): FfiFunction[] => {
+  const functions: FfiFunction[] = []
+  const lines = source.split("\n")
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].trim() !== "// @butter-export") continue
+    let buf = ""
+    for (let j = i + 1; j < lines.length; j++) {
+      const stripped = lines[j].split("//")[0]
+      buf += " " + stripped
+      const terminator = buf.search(/[{;]/)
+      if (terminator !== -1) {
+        const sig = buf.substring(0, terminator).trim()
+        if (/\bfn\s+\w+/.test(sig)) {
+          const fn = parseZigSignature(sig)
+          if (fn) functions.push(fn)
+        }
+        break
+      }
+    }
+  }
+  return functions
+}
+
+// ---------- Bindings codegen (language-agnostic) ----------
 
 export const generateBindings = (moduleName: string, functions: FfiFunction[]): string => {
   const ffiDefs = functions.map((fn) => {

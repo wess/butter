@@ -1,6 +1,6 @@
 # Butter Tutorial
 
-Butter is a lightweight desktop app framework for building native applications with TypeScript, HTML, and CSS. It uses the system webview (WKWebView on macOS, WebKitGTK on Linux) and Bun as the runtime — no bundled browser engine, no web servers, no Rust.
+Butter is a lightweight desktop app framework for building native applications with TypeScript, HTML, and CSS. It uses the system webview (WKWebView on macOS, WebKitGTK on Linux) and Bun as the runtime — no bundled browser engine, no web servers, no required Rust toolchain. (Rust *is* supported as an optional native-extension language; you just don't have to use it.)
 
 ## How It Works
 
@@ -31,7 +31,7 @@ Your TypeScript runs in Bun. Your UI runs in the system webview. They communicat
 1. [Getting Started](./gettingstarted.md) — Install, create a project, run it
 2. [IPC](./ipc.md) — invoke/on patterns, async handlers, error handling
 3. [Menus](./menus.md) — Native menus, shortcuts, handling custom actions
-4. [Native Extensions](./native.md) — Write C or Moxy code, auto-compiled with FFI bindings
+4. [Native Extensions](./native.md) — Write C, Moxy, Rust, or Zig code, auto-compiled with FFI bindings
 5. [Building](./building.md) — Compile to a single binary for distribution
 6. [Plugins](./plugins.md) — Creating and using plugins
 

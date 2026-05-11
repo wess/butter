@@ -5,6 +5,9 @@ export type CheckResult = {
   ok: boolean
   detail: string
   fix?: string
+  // Optional checks (Rust/Zig) report status but don't fail the doctor when
+  // missing — they're only required if the project has .rs/.zig sources.
+  optional?: boolean
 }
 
 export const checkBun = async (): Promise<CheckResult> => {
@@ -99,18 +102,56 @@ export const checkWebview = async (): Promise<CheckResult> => {
   return { name: "Webview", ok: false, detail: "Platform not yet supported" }
 }
 
+export const checkRust = async (): Promise<CheckResult> => {
+  try {
+    const rustc = (await withTimeout($`rustc --version`.text(), 5000)).trim()
+    let cargoNote = ""
+    try {
+      const cargo = (await withTimeout($`cargo --version`.text(), 5000)).trim()
+      cargoNote = `, ${cargo.split(" ").slice(0, 2).join(" ")}`
+    } catch {
+      cargoNote = ", cargo not found"
+    }
+    return { name: "Rust", ok: true, detail: `${rustc}${cargoNote}`, optional: true }
+  } catch {
+    return {
+      name: "Rust",
+      ok: false,
+      detail: "not installed",
+      fix: "Install Rust: https://www.rust-lang.org/tools/install (needed only for .rs native modules)",
+      optional: true,
+    }
+  }
+}
+
+export const checkZig = async (): Promise<CheckResult> => {
+  try {
+    const result = (await withTimeout($`zig version`.text(), 5000)).trim()
+    return { name: "Zig", ok: true, detail: `zig ${result}`, optional: true }
+  } catch {
+    return {
+      name: "Zig",
+      ok: false,
+      detail: "not installed",
+      fix: "Install Zig: https://ziglang.org/download (needed only for .zig native modules)",
+      optional: true,
+    }
+  }
+}
+
 export const runDoctor = async (): Promise<CheckResult[]> =>
-  Promise.all([checkBun(), checkCompiler(), checkWebview()])
+  Promise.all([checkBun(), checkCompiler(), checkWebview(), checkRust(), checkZig()])
 
 export const printDoctorResults = (results: CheckResult[]): boolean => {
   let allOk = true
   const issues: CheckResult[] = []
 
   for (const r of results) {
-    const status = r.ok ? r.detail : "MISSING"
-    const dots = ".".repeat(Math.max(1, 20 - r.name.length))
-    console.log(`  ${r.name} ${dots} ${status}`)
-    if (!r.ok) {
+    const label = r.optional ? `${r.name} (optional)` : r.name
+    const status = r.ok ? r.detail : r.optional ? r.detail : "MISSING"
+    const dots = ".".repeat(Math.max(1, 30 - label.length))
+    console.log(`  ${label} ${dots} ${status}`)
+    if (!r.ok && !r.optional) {
       allOk = false
       issues.push(r)
     }
