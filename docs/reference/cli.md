@@ -238,6 +238,37 @@ butter bundle
 
 ---
 
+### `butter package`
+
+Wraps the platform bundle from `butter bundle` into a distributable installer artifact.
+
+**Arguments**
+
+None. The project directory is always `process.cwd()`.
+
+**Behavior**
+
+| Platform | Output | Tool used | Notes |
+|---|---|---|---|
+| macOS | `dist/<App>.dmg` | `hdiutil` (ships with macOS) | Includes a drag-to-Applications shortcut. |
+| Linux | `dist/<App>-x86_64.AppImage` | `appimagetool` (auto-downloaded to `.butter/tools/`) | Falls back to a permissions chmod after build. |
+| Windows | `dist/<App>-setup.exe` if `makensis` is on `PATH`; otherwise `dist/<App>.zip` (portable). | NSIS / PowerShell `Compress-Archive` | The generated `.nsi` lives next to the bundle and can be edited for custom installers. |
+
+Run `butter bundle` first — `package` operates on the output bundle (`dist/<App>.app`, `dist/<App>.AppDir`, or `dist/<App>/`).
+
+**Example**
+
+```sh
+butter compile
+butter bundle
+butter package
+# dist/MyApp.dmg  (macOS)
+# dist/MyApp-x86_64.AppImage  (Linux)
+# dist/MyApp-setup.exe  or  dist/MyApp.zip  (Windows)
+```
+
+---
+
 ### `butter sign [options]`
 
 Code-signs the compiled binary or app bundle, and optionally submits it for notarization (macOS).

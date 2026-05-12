@@ -13,6 +13,9 @@ export type CreateWindowOptions = {
   transparent?: boolean
   alwaysOnTop?: boolean
   modal?: boolean
+  // Translucent system material. See WindowOptions.material in types/index.ts
+  // for the full per-platform behavior table.
+  material?: "vibrancy" | "mica" | "acrylic" | "tabbed" | "none"
 }
 
 type Runtime = {
@@ -175,3 +178,4 @@ export const ready = () => getRuntime().tell("window:ready")
 // These DO get a meaningful response from the shim — keep as control().
 export const screenshot = (path: string) => getRuntime().control("window:screenshot", { path })
 export const listScreens = () => getRuntime().control("screen:list")
+export const idleSeconds = () => getRuntime().control("power:idle")

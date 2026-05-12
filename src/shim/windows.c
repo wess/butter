@@ -2378,6 +2378,34 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    /* Optional translucent system backdrop (Windows 11+).
+     * BUTTER_MATERIAL=mica|acrylic|tabbed sets DWMWA_SYSTEMBACKDROP_TYPE.
+     * Silently no-ops on Win10 / older builds — the call just fails. */
+    {
+        const char *mat = getenv("BUTTER_MATERIAL");
+        if (mat && strcmp(mat, "none") != 0) {
+            int backdrop = 0;
+            if      (strcmp(mat, "mica")    == 0) backdrop = 2;
+            else if (strcmp(mat, "acrylic") == 0) backdrop = 3;
+            else if (strcmp(mat, "tabbed")  == 0) backdrop = 4;
+            if (backdrop != 0) {
+                /* DWMWA_SYSTEMBACKDROP_TYPE = 38 (Windows 11 22H2+) */
+                HMODULE dwm = LoadLibraryA("dwmapi.dll");
+                if (dwm) {
+                    typedef HRESULT (WINAPI *DwmSetWindowAttribute_t)(HWND, DWORD, LPCVOID, DWORD);
+                    DwmSetWindowAttribute_t pDwmSetWindowAttribute =
+                        (DwmSetWindowAttribute_t)GetProcAddress(dwm, "DwmSetWindowAttribute");
+                    if (pDwmSetWindowAttribute) {
+                        /* Enable dark/light mode follows + set backdrop. */
+                        BOOL useDark = TRUE;
+                        pDwmSetWindowAttribute(g_hwnd, 20, &useDark, sizeof(useDark)); /* DWMWA_USE_IMMERSIVE_DARK_MODE */
+                        pDwmSetWindowAttribute(g_hwnd, 38, &backdrop, sizeof(backdrop));
+                    }
+                }
+            }
+        }
+    }
+
     ShowWindow(g_hwnd, SW_SHOW);
     UpdateWindow(g_hwnd);
 

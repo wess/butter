@@ -67,6 +67,7 @@ describe("cli command registry", () => {
     expect(source).toContain("dev")
     expect(source).toContain("compile")
     expect(source).toContain("bundle")
+    expect(source).toContain("package")
     expect(source).toContain("sign")
     expect(source).toContain("doctor")
   })
@@ -79,7 +80,7 @@ describe("cli command registry", () => {
     const block = match![1]
     // Count command keys (lines with "word: async")
     const keys = block.match(/(\w+):\s*async/g) || []
-    expect(keys).toHaveLength(6)
+    expect(keys).toHaveLength(7)
   })
 })
 

@@ -15,6 +15,19 @@ export const parseConfig = (yaml: string): Config => {
       width: raw.window?.width ?? defaults.window.width,
       height: raw.window?.height ?? defaults.window.height,
       icon: raw.window?.icon ?? undefined,
+      resizable: typeof raw.window?.resizable === "boolean" ? raw.window.resizable : undefined,
+      frameless: typeof raw.window?.frameless === "boolean" ? raw.window.frameless : undefined,
+      transparent: typeof raw.window?.transparent === "boolean" ? raw.window.transparent : undefined,
+      alwaysOnTop: typeof raw.window?.alwaysOnTop === "boolean" ? raw.window.alwaysOnTop : undefined,
+      fullscreen: typeof raw.window?.fullscreen === "boolean" ? raw.window.fullscreen : undefined,
+      material:
+        raw.window?.material === "vibrancy" ||
+        raw.window?.material === "mica" ||
+        raw.window?.material === "acrylic" ||
+        raw.window?.material === "tabbed" ||
+        raw.window?.material === "none"
+          ? raw.window.material
+          : undefined,
     },
     build: {
       entry: raw.build?.entry ?? defaults.build.entry,
@@ -30,6 +43,9 @@ export const parseConfig = (yaml: string): Config => {
               ? raw.bundle.usageDescriptions
               : undefined,
           minimumSystemVersion: raw.bundle.minimumSystemVersion ?? undefined,
+          sidecars: Array.isArray(raw.bundle.sidecars)
+            ? raw.bundle.sidecars.filter((s: unknown) => typeof s === "string")
+            : undefined,
         }
       : undefined,
     plugins: raw.plugins ?? undefined,
@@ -37,6 +53,22 @@ export const parseConfig = (yaml: string): Config => {
       ? {
           csp: raw.security.csp ?? undefined,
           allowlist: Array.isArray(raw.security.allowlist) ? raw.security.allowlist : undefined,
+          capabilities: Array.isArray(raw.security.capabilities)
+            ? raw.security.capabilities
+                .map((c: unknown) => {
+                  if (!c || typeof c !== "object") return null
+                  const obj = c as Record<string, unknown>
+                  if (typeof obj.name !== "string" || !Array.isArray(obj.actions)) return null
+                  return {
+                    name: obj.name,
+                    actions: obj.actions.filter((a: unknown) => typeof a === "string"),
+                    origins: Array.isArray(obj.origins)
+                      ? obj.origins.filter((o: unknown) => typeof o === "string")
+                      : undefined,
+                  }
+                })
+                .filter((c: unknown): c is { name: string; actions: string[]; origins?: string[] } => c !== null)
+            : undefined,
         }
       : undefined,
     splash: raw.splash ?? undefined,

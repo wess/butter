@@ -14,6 +14,11 @@ export type WindowOptions = {
   transparent?: boolean
   alwaysOnTop?: boolean
   fullscreen?: boolean
+  // Translucent system material applied to the window background.
+  //   vibrancy — NSVisualEffectView on macOS
+  //   mica / acrylic / tabbed — DWM system backdrop on Windows 11
+  // Linux is best-effort (no equivalent in WebKitGTK); ignored if not supported.
+  material?: "vibrancy" | "mica" | "acrylic" | "tabbed" | "none"
 }
 
 export type BuildOptions = {
@@ -47,11 +52,30 @@ export type BundleOptions = {
   urlSchemes?: string[]
   usageDescriptions?: UsageDescriptions
   minimumSystemVersion?: string
+  // External executables shipped alongside the binary (ffmpeg, yt-dlp, ...).
+  // Each entry is a path relative to the project root. Bundling copies them
+  // into the bundle's sidecars dir; the sidecar plugin resolves by basename.
+  sidecars?: string[]
+}
+
+// A capability groups related IPC actions under a single grant. The webview
+// may invoke an action only if at least one matching capability grants it.
+//
+//   name     — human label, used in error messages
+//   actions  — exact action names or `prefix:*` globs
+//   origins  — optional `butter://` origin allowlist (defaults to all)
+export type Capability = {
+  name: string
+  actions: string[]
+  origins?: string[]
 }
 
 export type SecurityOptions = {
   csp?: string
+  // Back-compat flat allowlist. Patterns: exact match or `prefix:*`. If both
+  // allowlist and capabilities are provided, the union grants access.
   allowlist?: string[]
+  capabilities?: Capability[]
 }
 
 export type MCPOptions = {

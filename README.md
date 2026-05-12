@@ -19,6 +19,15 @@ Butter gives you a native window with a webview and a direct IPC bridge between 
 | IPC | JSON over IPC pipe | JSON commands | Shared memory ring buffer |
 | Language | JS/TS | Rust + JS/TS | TypeScript + C/Moxy/Rust/Zig |
 | Build tool | webpack/vite | Cargo | Bun |
+| Installers | Squirrel/electron-builder | Tauri bundler | `butter package` (DMG/AppImage/NSIS) |
+| Single-instance | API | plugin | `singleinstance` plugin |
+| SQLite | userland | `sql` plugin | `database` plugin (`bun:sqlite`) |
+| Persistent KV | userland | `store` plugin | `store` plugin |
+| Sidecar binaries | userland | yes | `bundle.sidecars` + `sidecar` plugin |
+| Translucent window | API | window effects | `window.material` (vibrancy / mica / acrylic) |
+| Auto-launch at login | API | plugin | `autolaunch` plugin |
+| Power / idle / screen events | API | plugin | `power` plugin |
+| Capability permissions | — | yes (v2) | `security.capabilities[]` |
 
 Butter's sweet spot: you want native desktop apps with TypeScript on both sides, native performance where you need it via C/Moxy/Rust/Zig, and zero configuration.
 
@@ -134,6 +143,7 @@ window:
   width: 800
   height: 600
   icon: assets/icon.png    # optional
+  material: vibrancy       # optional: vibrancy | mica | acrylic | tabbed | none
 
 build:
   entry: src/app/index.html
@@ -144,17 +154,34 @@ bundle:
   category: public.app-category.utilities
   urlSchemes:
     - myapp
+  sidecars:                # optional: external binaries shipped with the app
+    - bin/ffmpeg
+    - bin/yt-dlp
 
 security:
   csp: "default-src 'self' butter:"
+  # Flat allowlist (back-compat). Patterns: exact match or `prefix:*`.
   allowlist:
     - "dialog:*"
     - "greet"
+  # Capabilities — groups of actions granted as a unit. Either form (or both)
+  # works; the union grants access.
+  capabilities:
+    - name: filesystem
+      actions: ["fs:*", "dialog:open"]
+    - name: storage
+      actions: ["store:*", "db:*"]
 
 splash: src/app/splash.html
 
 plugins:
-  - butter-plugin-dialog
+  - dialog
+  - singleinstance
+  - autolaunch
+  - database
+  - store
+  - power
+  - sidecar
 ```
 
 ## API
@@ -223,6 +250,39 @@ const action = await butter.contextMenu([
   { separator: true },
   { label: "Delete", action: "delete" },
 ])
+
+// Persistent KV store (per-app, JSON-backed)
+const settings = butter.store("settings")
+await settings.set("theme", "dark")
+const theme = await settings.get("theme")
+
+// Embedded SQLite database
+const db = await butter.db.open("app")
+await db.exec("CREATE TABLE IF NOT EXISTS notes (id INTEGER PRIMARY KEY, body TEXT)")
+await db.exec("INSERT INTO notes (body) VALUES (?)", ["hello"])
+const rows = await db.query("SELECT * FROM notes")
+
+// Auto-launch at login
+await butter.autoLaunch.enable()
+const enabled = await butter.autoLaunch.isEnabled()
+await butter.autoLaunch.disable()
+
+// Single-instance — second launches fire this on the leader
+butter.singleInstance.onSecondInstance((info) => {
+  console.log("another launch:", info.argv, info.cwd)
+})
+
+// Power / display events
+butter.power.onSleep(() => console.log("system going to sleep"))
+butter.power.onLock(() => console.log("screen locked"))
+const idle = await butter.power.idleSeconds()  // seconds since last input
+
+const screens = await butter.screen.list()  // [{ id, primary, scale, bounds, workArea }]
+
+// Sidecar binaries (declared in butter.yaml under bundle.sidecars)
+const ffmpeg = await butter.sidecar.spawn("ffmpeg", { args: ["-version"] })
+ffmpeg.onStdout((d) => console.log(d.data))
+ffmpeg.onExit((d) => console.log("exit", d.code))
 ```
 
 The `butter` global is automatically injected into the webview. TypeScript types are provided via `src/env.d.ts`.
@@ -395,6 +455,7 @@ butter init <name> [--template vanilla|react|svelte|vue]
 butter dev           Start development mode (hot reload + DevTools)
 butter compile       Build a single-file binary
 butter bundle        Create OS-native app package (.app / AppDir)
+butter package       Build a distributable installer (DMG / AppImage / NSIS)
 butter sign          Code-sign and notarize the app bundle
 butter doctor        Check platform prerequisites
 ```
@@ -422,6 +483,17 @@ Creates an OS-native app package:
 - **macOS**: `.app` bundle with `Info.plist`, icon, and the compiled binary
 - **Linux**: AppDir structure with `.desktop` file and `AppRun` symlink
 - **Windows**: Distribution folder with `.exe` and resources
+
+Any sidecars declared in `bundle.sidecars` are copied into a `sidecars/` directory adjacent to the main executable.
+
+### `butter package`
+
+Wraps the platform bundle as a distributable artifact:
+- **macOS**: `dist/<App>.dmg` — built with `hdiutil`, includes a drag-to-Applications shortcut.
+- **Linux**: `dist/<App>-x86_64.AppImage` — built via `appimagetool`, auto-downloaded into `.butter/tools/` on first run.
+- **Windows**: `dist/<App>-setup.exe` if `makensis` (NSIS) is on PATH; otherwise falls back to `dist/<App>.zip` (portable).
+
+Run `butter bundle` first; `package` operates on the output bundle.
 
 ### `butter doctor`
 
@@ -483,6 +555,32 @@ Built-in plugins for common native capabilities:
 | Plugin | Capabilities |
 |--------|-------------|
 | `autoupdater` | Check for updates, download, and apply new versions |
+| `autolaunch` | Register the app to launch at user login (macOS/Linux/Windows) |
+
+### Single-instance / IPC between launches
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `singleinstance` | Enforce a single running instance; second launches forward argv to the leader |
+
+### Power & display
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `power` | Sleep/wake, screen sleep/wake, screen lock/unlock events, and idle-time queries (`butter.power`, `butter.screen.list`) |
+
+### External binaries
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `sidecar` | Spawn, kill, and stream stdio of bundled external executables (ffmpeg, yt-dlp, etc.) declared in `bundle.sidecars` |
+
+### Storage
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `database` | Embedded SQLite via `bun:sqlite` — `butter.db.open(name)` returns a connection with `query`, `exec`, `get` |
+| `store` | Persistent JSON-file KV store — `butter.store("settings").set/get/delete/keys/clear` |
 
 ### Localization
 

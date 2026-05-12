@@ -103,7 +103,7 @@ Butter imports each plugin module at startup, calls `host()` to register handler
 
 ## Built-in Plugins
 
-Butter ships with 20 built-in plugins covering common desktop application needs.
+Butter ships with 26 built-in plugins covering common desktop application needs.
 
 ### Window & UI
 
@@ -133,6 +133,8 @@ Butter ships with 20 built-in plugins covering common desktop application needs.
 | `fs` | Sandboxed file system access (read, write, watch) |
 | `securestorage` | Encrypted key-value storage backed by OS keychain |
 | `downloads` | Download files with progress tracking and destination control |
+| `database` | Embedded SQLite via `bun:sqlite` — `butter.db.open(name)` |
+| `store` | Persistent JSON-file KV store — `butter.store(name).set/get/...` |
 
 ### Monitoring
 
@@ -141,12 +143,21 @@ Butter ships with 20 built-in plugins covering common desktop application needs.
 | `network` | Online/offline detection and connectivity change events |
 | `logging` | Structured logging to file with rotation and log levels |
 | `crashreporter` | Capture and report uncaught exceptions and native crashes |
+| `power` | Sleep/wake, screen lock/unlock, idle time, display enumeration |
 
-### Updates
+### Updates & launch
 
 | Plugin | Capabilities |
 |--------|-------------|
 | `autoupdater` | Check for updates, download, and apply new versions |
+| `autolaunch` | Register the app to launch at user login (per-user, all platforms) |
+| `singleinstance` | Enforce a single running instance; second launches forward argv |
+
+### External binaries
+
+| Plugin | Capabilities |
+|--------|-------------|
+| `sidecar` | Spawn / kill / stream stdio of bundled executables declared in `bundle.sidecars` |
 
 ### Localization
 

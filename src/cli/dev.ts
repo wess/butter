@@ -303,9 +303,13 @@ export const runDev = async (projectDir: string): Promise<void> => {
   const env: Record<string, string> = {
     BUTTER_TITLE: config.window.title,
     BUTTER_DEV: "1",
+    BUTTER_APP_ID: config.bundle?.identifier ?? config.window.title.replace(/[^a-zA-Z0-9._-]/g, "_"),
   }
   if (config.window.icon) {
     env.BUTTER_ICON = join(projectDir, config.window.icon)
+  }
+  if (config.window.material && config.window.material !== "none") {
+    env.BUTTER_MATERIAL = config.window.material
   }
   if (config.security?.csp) {
     env.BUTTER_CSP = config.security.csp
@@ -313,6 +317,19 @@ export const runDev = async (projectDir: string): Promise<void> => {
   if (config.splash) {
     env.BUTTER_SPLASH = join(projectDir, config.splash)
   }
+  if (config.bundle?.sidecars && config.bundle.sidecars.length > 0) {
+    // name==absolutePath joined by ':::' so the sidecar plugin can read it in.
+    env.BUTTER_SIDECARS = config.bundle.sidecars
+      .map((rel) => {
+        const abs = join(projectDir, rel)
+        const name = rel.split("/").pop()?.replace(/\.exe$/, "") ?? rel
+        return `${name}==${abs}`
+      })
+      .join(":::")
+  }
+  // The host process also reads BUTTER_APP_ID/BUTTER_SIDECARS for its plugins.
+  process.env.BUTTER_APP_ID = env.BUTTER_APP_ID
+  if (env.BUTTER_SIDECARS) process.env.BUTTER_SIDECARS = env.BUTTER_SIDECARS
 
   // Load and pass menu if present
   const menu = await loadMenu(projectDir)
@@ -373,17 +390,26 @@ export const runDev = async (projectDir: string): Promise<void> => {
     console.log("  MCP server: disabled")
   }
 
-  // 8. Build allowlist matcher
-  const allowlist = config.security?.allowlist ?? null
+  // 8. Build allow matcher. Union of flat `security.allowlist` (back-compat)
+  // and `security.capabilities[].actions`. If neither is set, all actions
+  // are allowed (no security policy declared).
+  const flatPatterns = config.security?.allowlist ?? null
+  const capabilities = config.security?.capabilities ?? null
+  const hasPolicy = flatPatterns !== null || (capabilities && capabilities.length > 0)
+  const matches = (action: string, pattern: string): boolean => {
+    if (pattern === "*") return true
+    if (pattern.endsWith(":*")) return action.startsWith(pattern.slice(0, -1))
+    return action === pattern
+  }
   const isAllowed = (action: string): boolean => {
-    if (!allowlist) return true
-    return allowlist.some((pattern) => {
-      if (pattern === "*") return true
-      if (pattern.endsWith(":*")) {
-        return action.startsWith(pattern.slice(0, -1))
+    if (!hasPolicy) return true
+    if (flatPatterns && flatPatterns.some((p) => matches(action, p))) return true
+    if (capabilities) {
+      for (const cap of capabilities) {
+        if (cap.actions.some((p) => matches(action, p))) return true
       }
-      return action === pattern
-    })
+    }
+    return false
   }
 
   // 9. Poll loop

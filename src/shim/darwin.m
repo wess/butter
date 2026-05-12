@@ -11,6 +11,7 @@
 #import <Cocoa/Cocoa.h>
 #import <WebKit/WebKit.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
+#import <CoreGraphics/CoreGraphics.h>
 #include <sys/mman.h>
 #include <semaphore.h>
 
@@ -103,6 +104,24 @@ static void ring_read_bytes(uint32_t base_off, uint32_t cursor,
 /* ---------- ring buffer write (to-bun) ---------- */
 
 static void buildMenuBar(const char *title, const char *menuJson, id delegate);
+
+/* Apply a translucent NSVisualEffectView as the window's content background.
+ * Caller must set the webview to drawsBackground=NO for the material to
+ * show through. `material` is "vibrancy" (default sidebar look) or "none". */
+static void apply_window_material(NSWindow *win, const char *material) {
+    if (!material || strcmp(material, "none") == 0) return;
+    NSView *content = win.contentView;
+    NSVisualEffectView *fx = [[NSVisualEffectView alloc] initWithFrame:content.bounds];
+    fx.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    fx.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    fx.state = NSVisualEffectStateActive;
+    fx.material = NSVisualEffectMaterialSidebar;
+    /* Insert behind any existing subviews. */
+    [content addSubview:fx positioned:NSWindowBelow relativeTo:nil];
+    /* Drop opaque background so the effect is visible. */
+    [win setOpaque:NO];
+    [win setBackgroundColor:[NSColor clearColor]];
+}
 
 static pending_frame_t *make_frame(const uint8_t *payload, uint32_t len, uint32_t flags) {
     pending_frame_t *f = (pending_frame_t *)malloc(sizeof(pending_frame_t));
@@ -389,6 +408,15 @@ static id g_globalMonitor = nil;
             name:NSWorkspaceScreensDidSleepNotification object:nil];
         [wsnc addObserver:self selector:@selector(screensDidWake:)
             name:NSWorkspaceScreensDidWakeNotification object:nil];
+
+        /* Screen lock/unlock comes via the distributed notification center —
+         * Apple doesn't expose this on NSWorkspace. The names are stable but
+         * undocumented. */
+        NSDistributedNotificationCenter *dnc = [NSDistributedNotificationCenter defaultCenter];
+        [dnc addObserver:self selector:@selector(screenDidLock:)
+            name:@"com.apple.screenIsLocked" object:nil];
+        [dnc addObserver:self selector:@selector(screenDidUnlock:)
+            name:@"com.apple.screenIsUnlocked" object:nil];
     }
     return self;
 }
@@ -410,6 +438,16 @@ static id g_globalMonitor = nil;
 
 - (void)screensDidWake:(NSNotification *)note {
     const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:screenwake\"}";
+    ring_write_tb(json, strlen(json));
+}
+
+- (void)screenDidLock:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:lock\"}";
+    ring_write_tb(json, strlen(json));
+}
+
+- (void)screenDidUnlock:(NSNotification *)note {
+    const char *json = "{\"id\":\"0\",\"type\":\"event\",\"action\":\"power:unlock\"}";
     ring_write_tb(json, strlen(json));
 }
 
@@ -1049,6 +1087,11 @@ static id g_globalMonitor = nil;
         [win setLevel:NSFloatingWindowLevel];
     }
 
+    NSString *material = opts[@"material"];
+    if (material && [material isKindOfClass:[NSString class]]) {
+        apply_window_material(win, [material UTF8String]);
+    }
+
     /* Create webview config with scheme handler + bridge */
     WKWebViewConfiguration *config = [[WKWebViewConfiguration alloc] init];
     ButterSchemeHandler *schemeHandler = [[ButterSchemeHandler alloc] init];
@@ -1072,7 +1115,7 @@ static id g_globalMonitor = nil;
     WKWebView *webview = [[WKWebView alloc] initWithFrame:win.contentView.bounds configuration:config];
     webview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
 
-    if ([transparent boolValue]) {
+    if ([transparent boolValue] || (material && [material isKindOfClass:[NSString class]] && ![material isEqualToString:@"none"])) {
         [webview setValue:@NO forKey:@"drawsBackground"];
     }
 
@@ -1465,6 +1508,47 @@ static unsigned short keyCodeForString(NSString *key) {
                         ring_write_tb(resp, strlen(resp));
                     }];
                 }
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"power:idle\"")) {
+                NSString *msgId = @"0";
+                NSData *jd = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
+                if (parsed[@"id"]) msgId = parsed[@"id"];
+                /* Seconds since the last HID event of any kind. */
+                CFTimeInterval idle = CGEventSourceSecondsSinceLastEventType(
+                    kCGEventSourceStateHIDSystemState, kCGAnyInputEventType);
+                char resp[256];
+                snprintf(resp, sizeof(resp),
+                    "{\"id\":\"%s\",\"type\":\"response\",\"action\":\"power:idle\",\"data\":{\"ok\":true,\"seconds\":%.3f}}",
+                    [msgId UTF8String], idle);
+                ring_write_tb(resp, strlen(resp));
+                free(msg);
+                continue;
+            }
+            if (strstr(msg, "\"screen:list\"")) {
+                NSString *msgId = @"0";
+                NSData *jd = [json dataUsingEncoding:NSUTF8StringEncoding];
+                NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
+                if (parsed[@"id"]) msgId = parsed[@"id"];
+                NSArray<NSScreen *> *screens = [NSScreen screens];
+                NSMutableArray *out = [NSMutableArray array];
+                NSInteger idx = 0;
+                for (NSScreen *s in screens) {
+                    NSRect f = [s frame];
+                    NSRect v = [s visibleFrame];
+                    [out addObject:@{
+                        @"id": @(idx++),
+                        @"primary": @(s == [NSScreen mainScreen]),
+                        @"scale": @([s backingScaleFactor]),
+                        @"bounds": @{ @"x": @(f.origin.x), @"y": @(f.origin.y), @"width": @(f.size.width), @"height": @(f.size.height) },
+                        @"workArea": @{ @"x": @(v.origin.x), @"y": @(v.origin.y), @"width": @(v.size.width), @"height": @(v.size.height) }
+                    }];
+                }
+                NSDictionary *body = @{ @"id": msgId, @"type": @"response", @"action": @"screen:list", @"data": @{ @"ok": @(YES), @"screens": out } };
+                NSData *jout = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
+                if (jout) ring_write_tb([jout bytes], (uint32_t)[jout length]);
                 free(msg);
                 continue;
             }
@@ -1904,6 +1988,12 @@ int main(int argc, char **argv) {
         [win setDelegate:delegate];
         delegate.window = win;
 
+        /* Apply translucent material (vibrancy) if requested by env. */
+        const char *envMaterial = getenv("BUTTER_MATERIAL");
+        if (envMaterial && strcmp(envMaterial, "none") != 0) {
+            apply_window_material(win, envMaterial);
+        }
+
         /* Set app icon if provided */
         const char *iconPath = getenv("BUTTER_ICON");
         if (iconPath) {
@@ -1915,6 +2005,9 @@ int main(int argc, char **argv) {
         /* WebView */
         WKWebView *webview = [[WKWebView alloc] initWithFrame:win.contentView.bounds configuration:config];
         webview.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        if (envMaterial && strcmp(envMaterial, "none") != 0) {
+            [webview setValue:@NO forKey:@"drawsBackground"];
+        }
         [win.contentView addSubview:webview];
         delegate.webview = webview;
         webview.navigationDelegate = delegate;

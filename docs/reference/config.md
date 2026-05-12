@@ -10,28 +10,41 @@ Configuration is parsed by `src/config/index.ts` using `Bun.YAML.parse`.
 
 ```yaml
 window:
-  title: string      # default: "Butter App"
-  width: number      # default: 800
-  height: number     # default: 600
+  title: string             # default: "Butter App"
+  width: number             # default: 800
+  height: number            # default: 600
+  icon: string              # default: undefined
+  resizable: boolean        # default: true
+  frameless: boolean        # default: false
+  transparent: boolean      # default: false
+  alwaysOnTop: boolean      # default: false
+  fullscreen: boolean       # default: false
+  material: string          # default: undefined  (vibrancy | mica | acrylic | tabbed | none)
 
 build:
-  entry: string      # default: "src/app/index.html"
-  host: string       # default: "src/host/index.ts"
+  entry: string             # default: "src/app/index.html"
+  host: string              # default: "src/host/index.ts"
 
 bundle:
-  identifier: string # default: undefined
-  category: string   # default: undefined
-  urlSchemes:        # default: undefined
+  identifier: string        # default: undefined
+  category: string          # default: undefined
+  urlSchemes:               # default: undefined
+    - string
+  sidecars:                 # default: undefined  (paths relative to project root)
     - string
 
 security:
-  csp: string        # default: undefined
-  allowlist:         # default: undefined (allow all)
+  csp: string               # default: undefined
+  allowlist:                # default: undefined (allow all)
     - string
+  capabilities:             # default: undefined  (groups of actions)
+    - name: string
+      actions: [string]
+      origins: [string]     # optional, butter:// origins
 
-splash: string       # default: undefined
+splash: string              # default: undefined
 
-plugins:             # optional
+plugins:                    # optional
   - string
 ```
 
@@ -85,6 +98,28 @@ Initial window height.
 ```yaml
 window:
   height: 720
+```
+
+### `window.material`
+
+| | |
+|---|---|
+| Type | `"vibrancy" \| "mica" \| "acrylic" \| "tabbed" \| "none"` |
+| Default | `undefined` |
+
+Applies a translucent system material to the window background. The webview's background is set transparent so the material shows through — make sure your CSS doesn't paint an opaque `body { background: ... }` or the effect won't be visible.
+
+| Value | macOS | Windows 11 | Linux |
+|---|---|---|---|
+| `vibrancy` | `NSVisualEffectView` (sidebar material) | no-op | no-op |
+| `mica` | `NSVisualEffectView` (sidebar material) | `DWMWA_SYSTEMBACKDROP_TYPE = 2` | no-op |
+| `acrylic` | `NSVisualEffectView` (sidebar material) | `DWMWA_SYSTEMBACKDROP_TYPE = 3` | no-op |
+| `tabbed` | `NSVisualEffectView` (sidebar material) | `DWMWA_SYSTEMBACKDROP_TYPE = 4` | no-op |
+| `none` | regular opaque window | regular opaque window | regular opaque window |
+
+```yaml
+window:
+  material: vibrancy
 ```
 
 ---
@@ -170,6 +205,38 @@ bundle:
     - myapp
 ```
 
+### `bundle.sidecars`
+
+| | |
+|---|---|
+| Type | `string[]` |
+| Default | `undefined` |
+
+External executables to ship alongside the main binary (ffmpeg, yt-dlp, a Go daemon, etc.). Paths are resolved relative to the project root.
+
+During `butter bundle`, each entry is copied (preserving the executable bit on POSIX) into:
+
+| Platform | Destination |
+|---|---|
+| macOS | `<App>.app/Contents/MacOS/sidecars/` |
+| Linux | `<App>.AppDir/usr/bin/sidecars/` |
+| Windows | `<App>/sidecars/` |
+
+The `sidecar` plugin discovers them by basename (without the `.exe` suffix on Windows).
+
+```yaml
+bundle:
+  sidecars:
+    - bin/ffmpeg
+    - bin/yt-dlp
+```
+
+```ts
+const ffmpeg = await butter.sidecar.spawn("ffmpeg", { args: ["-version"] })
+ffmpeg.onStdout((d) => console.log(d.data))
+ffmpeg.onExit((d) => console.log("exit", d.code))
+```
+
 ---
 
 ## `security`
@@ -206,6 +273,30 @@ security:
     - "greet"       # Exact match
     - "*"           # Allow all (default when omitted)
 ```
+
+### `security.capabilities`
+
+| | |
+|---|---|
+| Type | `Capability[]` where `Capability = { name: string, actions: string[], origins?: string[] }` |
+| Default | `undefined` |
+
+A capability groups related IPC actions under a single named grant. The webview may invoke an action if *any* capability grants it (the union of all capabilities plus `allowlist` applies). Use capabilities when you want explicit, reviewable bundles of permission rather than a flat list — they make intent visible at the audit boundary.
+
+```yaml
+security:
+  capabilities:
+    - name: filesystem
+      actions: ["fs:*", "dialog:open", "dialog:save"]
+    - name: storage
+      actions: ["store:*", "db:*"]
+    - name: power-monitor
+      actions: ["power:idle", "screen:list"]
+```
+
+When both `allowlist` and `capabilities` are defined, the union grants access. When neither is defined, all actions are allowed (no policy).
+
+The `origins` field is reserved for future per-origin scoping (e.g. limiting an action to `butter://app/` vs `butter://settings/`); it currently parses but is not enforced.
 
 ---
 

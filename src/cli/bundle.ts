@@ -5,6 +5,28 @@ import { platform } from "os"
 import { loadConfig } from "../config"
 import type { Config } from "../types"
 
+// Copy declared sidecar binaries into a `sidecars/` dir adjacent to the
+// main executable inside the bundle, preserving the executable bit.
+const copySidecars = async (config: Config, projectDir: string, destDir: string): Promise<string[]> => {
+  const sidecars = config.bundle?.sidecars ?? []
+  if (sidecars.length === 0) return []
+  await mkdir(destDir, { recursive: true })
+  const copied: string[] = []
+  for (const rel of sidecars) {
+    const src = join(projectDir, rel)
+    if (!existsSync(src)) {
+      console.warn(`  Warning: sidecar not found at ${src} — skipping`)
+      continue
+    }
+    const name = basename(rel)
+    const dest = join(destDir, name)
+    await Bun.write(dest, Bun.file(src))
+    if (process.platform !== "win32") await chmod(dest, 0o755)
+    copied.push(name)
+  }
+  return copied
+}
+
 // ── macOS ──────────────────────────────────────────────────────────────────
 
 const generateUrlSchemesPlist = (config: Config): string => {
@@ -122,6 +144,11 @@ export const bundleMacApp = async (
   const plist = generatePlist(config, executableName, hasIcon)
   await Bun.write(join(appBundlePath, "Contents", "Info.plist"), plist)
 
+  // Sidecars go alongside the binary so they're on PATH-adjacent and signing
+  // covers them in a single pass.
+  const sidecars = await copySidecars(config, projectDir, join(macosDir, "sidecars"))
+  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
+
   return appBundlePath
 }
 
@@ -184,6 +211,9 @@ export const bundleLinuxAppDir = async (
   const desktop = generateDesktopEntry(config, executableName, hasIcon)
   await Bun.write(join(appDirPath, `${executableName}.desktop`), desktop)
 
+  const sidecars = await copySidecars(config, projectDir, join(usrBinDir, "sidecars"))
+  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
+
   return appDirPath
 }
 
@@ -211,6 +241,9 @@ export const bundleWindowsApp = async (
       await Bun.write(join(bundlePath, `icon.${ext}`), Bun.file(iconSrc))
     }
   }
+
+  const sidecars = await copySidecars(config, projectDir, join(bundlePath, "sidecars"))
+  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
 
   return bundlePath
 }
