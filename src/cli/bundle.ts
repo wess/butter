@@ -18,9 +18,41 @@ const generateUrlSchemesPlist = (config: Config): string => {
   return `\t<key>CFBundleURLTypes</key>\n\t<array>\n${entries}\n\t</array>\n`
 }
 
+const escapePlistString = (value: string): string =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+
+const usageDescriptionKey: Record<string, string> = {
+  microphone: "NSMicrophoneUsageDescription",
+  camera: "NSCameraUsageDescription",
+  appleEvents: "NSAppleEventsUsageDescription",
+  calendar: "NSCalendarsUsageDescription",
+  contacts: "NSContactsUsageDescription",
+  reminders: "NSRemindersUsageDescription",
+  photos: "NSPhotoLibraryUsageDescription",
+  location: "NSLocationUsageDescription",
+  bluetooth: "NSBluetoothAlwaysUsageDescription",
+  screenCapture: "NSScreenCaptureUsageDescription",
+}
+
+const generateUsageDescriptionsPlist = (config: Config): string => {
+  const usage = config.bundle?.usageDescriptions
+  if (!usage) return ""
+  const entries = Object.entries(usage)
+    .filter(([k, v]) => usageDescriptionKey[k] && typeof v === "string" && v.length > 0)
+    .map(
+      ([k, v]) =>
+        `\t<key>${usageDescriptionKey[k]}</key>\n\t<string>${escapePlistString(v as string)}</string>`,
+    )
+  return entries.length === 0 ? "" : `${entries.join("\n")}\n`
+}
+
 const generatePlist = (config: Config, executableName: string, hasIcon: boolean): string => {
   const identifier = config.bundle?.identifier ?? `com.example.${executableName}`
   const category = config.bundle?.category ?? "public.app-category.utilities"
+  const minSysVersion = config.bundle?.minimumSystemVersion ?? "11.0"
 
   const iconEntry = hasIcon
     ? `\t<key>CFBundleIconFile</key>\n\t<string>icon</string>\n`
@@ -31,7 +63,7 @@ const generatePlist = (config: Config, executableName: string, hasIcon: boolean)
 <plist version="1.0">
 <dict>
 \t<key>CFBundleName</key>
-\t<string>${config.window.title}</string>
+\t<string>${escapePlistString(config.window.title)}</string>
 \t<key>CFBundleIdentifier</key>
 \t<string>${identifier}</string>
 \t<key>CFBundleExecutable</key>
@@ -46,10 +78,11 @@ const generatePlist = (config: Config, executableName: string, hasIcon: boolean)
 \t<string>1.0.0</string>
 \t<key>LSApplicationCategoryType</key>
 \t<string>${category}</string>
+\t<key>LSMinimumSystemVersion</key>
+\t<string>${minSysVersion}</string>
 ${iconEntry}\t<key>NSHighResolutionCapable</key>
 \t<true/>
-${generateUrlSchemesPlist(config)}
-</dict>
+${generateUsageDescriptionsPlist(config)}${generateUrlSchemesPlist(config)}</dict>
 </plist>
 `
 }

@@ -24,6 +24,12 @@ export const parseConfig = (yaml: string): Config => {
       ? {
           identifier: raw.bundle.identifier ?? undefined,
           category: raw.bundle.category ?? undefined,
+          urlSchemes: Array.isArray(raw.bundle.urlSchemes) ? raw.bundle.urlSchemes : undefined,
+          usageDescriptions:
+            raw.bundle.usageDescriptions && typeof raw.bundle.usageDescriptions === "object"
+              ? raw.bundle.usageDescriptions
+              : undefined,
+          minimumSystemVersion: raw.bundle.minimumSystemVersion ?? undefined,
         }
       : undefined,
     plugins: raw.plugins ?? undefined,
@@ -43,6 +49,25 @@ export const parseConfig = (yaml: string): Config => {
           },
         }
       : undefined,
+    native:
+      raw.native && typeof raw.native === "object"
+        ? Object.fromEntries(
+            Object.entries(raw.native as Record<string, unknown>).map(([k, v]) => {
+              if (!v || typeof v !== "object") return [k, {}]
+              const m = v as Record<string, unknown>
+              return [
+                k,
+                {
+                  frameworks: Array.isArray(m.frameworks) ? m.frameworks : undefined,
+                  libs: Array.isArray(m.libs) ? m.libs : undefined,
+                  includes: Array.isArray(m.includes) ? m.includes : undefined,
+                  libDirs: Array.isArray(m.libDirs) ? m.libDirs : undefined,
+                  extraFlags: Array.isArray(m.extraFlags) ? m.extraFlags : undefined,
+                },
+              ]
+            }),
+          )
+        : undefined,
   }
 }
 

@@ -1,5 +1,7 @@
 import { $ } from "bun"
 import { join, dirname } from "path"
+import { loadConfig } from "../config"
+import type { Config, UsageDescriptions } from "../types"
 
 export const shimSourcePath = (): string => {
   const platform = process.platform
@@ -10,6 +12,61 @@ export const shimSourcePath = (): string => {
 export const shimBinaryPath = (projectDir: string): string => {
   const ext = process.platform === "win32" ? ".exe" : ""
   return join(projectDir, ".butter", `shim${ext}`)
+}
+
+const usageDescriptionKey: Record<keyof UsageDescriptions, string> = {
+  microphone: "NSMicrophoneUsageDescription",
+  camera: "NSCameraUsageDescription",
+  appleEvents: "NSAppleEventsUsageDescription",
+  calendar: "NSCalendarsUsageDescription",
+  contacts: "NSContactsUsageDescription",
+  reminders: "NSRemindersUsageDescription",
+  photos: "NSPhotoLibraryUsageDescription",
+  location: "NSLocationUsageDescription",
+  bluetooth: "NSBluetoothAlwaysUsageDescription",
+  screenCapture: "NSScreenCaptureUsageDescription",
+}
+
+const escapePlist = (s: string): string =>
+  s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+
+const generateEmbeddedPlist = (config: Config): string => {
+  const identifier = config.bundle?.identifier ?? "com.butter.devshim"
+  const title = config.window.title
+  const usage = config.bundle?.usageDescriptions ?? {}
+  const usageEntries = Object.entries(usage)
+    .filter(
+      ([k, v]) =>
+        (usageDescriptionKey as Record<string, string>)[k] &&
+        typeof v === "string" &&
+        (v as string).length > 0,
+    )
+    .map(
+      ([k, v]) =>
+        `\t<key>${(usageDescriptionKey as Record<string, string>)[k]}</key>\n\t<string>${escapePlist(v as string)}</string>`,
+    )
+    .join("\n")
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>CFBundleName</key>
+\t<string>${escapePlist(title)}</string>
+\t<key>CFBundleIdentifier</key>
+\t<string>${identifier}.dev</string>
+\t<key>CFBundlePackageType</key>
+\t<string>APPL</string>
+\t<key>CFBundleInfoDictionaryVersion</key>
+\t<string>6.0</string>
+\t<key>CFBundleShortVersionString</key>
+\t<string>0.0.0-dev</string>
+\t<key>LSUIElement</key>
+\t<false/>
+${usageEntries}
+</dict>
+</plist>
+`
 }
 
 export const needsRecompile = async (
@@ -45,7 +102,18 @@ export const compileShim = async (projectDir: string): Promise<string> => {
   await mkdir(outputDir, { recursive: true })
 
   if (process.platform === "darwin") {
-    await $`clang -o ${output} ${source} -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -fobjc-arc`
+    /*
+     * Embed an Info.plist into the binary's __TEXT,__info_plist section so
+     * loose (non-bundled) binaries can declare privacy usage descriptions.
+     * Without this, macOS Sequoia+ silently denies mic/camera/automation
+     * requests in dev mode because the binary has no bundle identity.
+     */
+    const config = await loadConfig(projectDir)
+    const plist = generateEmbeddedPlist(config)
+    const plistPath = join(outputDir, "shim.Info.plist")
+    await Bun.write(plistPath, plist)
+
+    await $`clang -o ${output} ${source} -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -fobjc-arc -sectcreate __TEXT __info_plist ${plistPath}`
   } else if (process.platform === "linux") {
     // -lX11 is required: linux.c calls XStringToKeysym, XKeysymToKeycode,
     // XGrabKey, XUngrabKey directly (global shortcuts). Modern ld with

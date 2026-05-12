@@ -363,7 +363,7 @@ static RegisteredShortcut g_shortcuts[MAX_SHORTCUTS];
 static int g_shortcut_count = 0;
 static id g_globalMonitor = nil;
 
-@interface ButterDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate>
+@interface ButterDelegate : NSObject <NSApplicationDelegate, NSWindowDelegate, WKScriptMessageHandler, WKNavigationDelegate, WKUIDelegate>
 @property (nonatomic, strong) WKWebView *webview;
 @property (nonatomic, strong) NSWindow *window;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSWindow *> *windows;
@@ -946,6 +946,16 @@ static id g_globalMonitor = nil;
 - (void)windowWillClose:(NSNotification *)notification {
     const char *quit = "{\"id\":\"0\",\"type\":\"control\",\"action\":\"quit\"}";
     ring_write_tb(quit, strlen(quit));
+    /*
+     * Schedule a hard exit one second from now. WKWebView's WebProcess can
+     * sometimes hang on teardown (heavy JS state, pending IPC), which causes
+     * a system-wide beach ball. -[NSApp terminate:] waits for that to finish.
+     * Falling back to _exit(0) guarantees the user gets their click back.
+     */
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                   dispatch_get_main_queue(), ^{
+        _exit(0);
+    });
     [NSApp terminate:nil];
 }
 
@@ -1068,6 +1078,7 @@ static id g_globalMonitor = nil;
 
     [win.contentView addSubview:webview];
     webview.navigationDelegate = self;
+    webview.UIDelegate = self;
 
     /* Load URL */
     NSURL *appURL = [NSURL URLWithString:url];
@@ -1659,6 +1670,22 @@ static unsigned short keyCodeForString(NSString *key) {
     }
 }
 
+/* ---------- WKUIDelegate: grant media capture (camera/mic) ---------- */
+/*
+ * Without this, WKWebView silently denies getUserMedia() with no OS prompt.
+ * We grant unconditionally — the host process trusts its own webview content.
+ * macOS still enforces TCC at the underlying CoreAudio layer, so the OS
+ * mic-permission prompt fires on first use when NSMicrophoneUsageDescription
+ * is declared in the bundle's Info.plist.
+ */
+- (void)webView:(WKWebView *)webView
+    requestMediaCapturePermissionForOrigin:(WKSecurityOrigin *)origin
+    initiatedByFrame:(WKFrameInfo *)frame
+    type:(WKMediaCaptureType)type
+    decisionHandler:(void (^)(WKPermissionDecision))decisionHandler {
+    decisionHandler(WKPermissionDecisionGrant);
+}
+
 @end
 
 /* ---------- build native menu from JSON ---------- */
@@ -1891,6 +1918,7 @@ int main(int argc, char **argv) {
         [win.contentView addSubview:webview];
         delegate.webview = webview;
         webview.navigationDelegate = delegate;
+        webview.UIDelegate = delegate;
 
         /* Enable DevTools inspector in dev mode */
         const char *devMode = getenv("BUTTER_DEV");

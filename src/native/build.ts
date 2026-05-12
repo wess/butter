@@ -21,10 +21,14 @@
  *  - artifacts are cached on a fingerprint of (source bytes, compiler
  *    flags, host platform). A `.fp` file alongside the .dylib/.so/.dll
  *    holds the hash; matching fingerprint skips recompilation.
+ *  - per-module flags (frameworks, libs, include dirs) come from
+ *    `butter.yaml`'s `native:` block — see `NativeModuleOptions`.
  */
 
-import { join, basename, extname } from "path"
+import { join, basename, extname, isAbsolute, resolve } from "path"
 import { readdir } from "fs/promises"
+import { loadConfig } from "../config"
+import type { NativeModuleOptions } from "../types"
 import { extractExports, extractRustExports, extractZigExports, generateBindings } from "./parser"
 import type { FfiFunction } from "./parser"
 
@@ -36,26 +40,59 @@ const libExtension = (): string => {
   return "so"
 }
 
-const cCompilerCommand = (sourcePath: string, outputPath: string): { cmd: string[]; signature: string } => {
+const resolvePath = (projectDir: string, p: string): string =>
+  isAbsolute(p) ? p : resolve(projectDir, p)
+
+const moduleCompileFlags = (
+  opts: NativeModuleOptions | undefined,
+  projectDir: string,
+): { flags: string[]; signature: string } => {
+  if (!opts) return { flags: [], signature: "" }
+  const flags: string[] = []
+  for (const inc of opts.includes ?? []) flags.push(`-I${resolvePath(projectDir, inc)}`)
+  for (const dir of opts.libDirs ?? []) flags.push(`-L${resolvePath(projectDir, dir)}`)
+  for (const lib of opts.libs ?? []) flags.push(`-l${lib}`)
+  if (process.platform === "darwin") {
+    for (const fw of opts.frameworks ?? []) flags.push("-framework", fw)
+  }
+  for (const f of opts.extraFlags ?? []) flags.push(f)
+  // signature uses project-relative paths so the fingerprint is stable
+  // when the project is moved.
+  const sig = [
+    ...(opts.frameworks ?? []).map((f) => `-framework ${f}`),
+    ...(opts.includes ?? []).map((i) => `-I${i}`),
+    ...(opts.libDirs ?? []).map((d) => `-L${d}`),
+    ...(opts.libs ?? []).map((l) => `-l${l}`),
+    ...(opts.extraFlags ?? []),
+  ].join(" ")
+  return { flags, signature: sig }
+}
+
+const cCompilerCommand = (
+  sourcePath: string,
+  outputPath: string,
+  extraFlags: string[] = [],
+  extraSignature = "",
+): { cmd: string[]; signature: string } => {
   const incFlag = `-I${import.meta.dir}`
   if (process.platform === "darwin") {
-    const flags = ["-shared", "-fPIC", "-fvisibility=default", "-O2", incFlag]
+    const flags = ["-shared", "-fPIC", "-fvisibility=default", "-O2", incFlag, ...extraFlags]
     return {
       cmd: ["clang", ...flags, "-o", outputPath, sourcePath],
-      signature: `clang ${flags.join(" ")} darwin`,
+      signature: `clang -O2 darwin ${extraSignature}`.trim(),
     }
   }
   if (process.platform === "win32") {
-    const flags = ["/LD", "/O2", `/I${import.meta.dir}`]
+    const flags = ["/LD", "/O2", `/I${import.meta.dir}`, ...extraFlags]
     return {
       cmd: ["cl.exe", ...flags, `/Fe:${outputPath}`, sourcePath],
-      signature: `cl.exe ${flags.join(" ")} win32`,
+      signature: `cl.exe /O2 win32 ${extraSignature}`.trim(),
     }
   }
-  const flags = ["-shared", "-fPIC", "-fvisibility=default", "-O2", incFlag]
+  const flags = ["-shared", "-fPIC", "-fvisibility=default", "-O2", incFlag, ...extraFlags]
   return {
     cmd: ["cc", ...flags, "-o", outputPath, sourcePath],
-    signature: `cc ${flags.join(" ")} linux`,
+    signature: `cc -O2 linux ${extraSignature}`.trim(),
   }
 }
 
@@ -68,8 +105,6 @@ const rustcCommand = (sourcePath: string, outputPath: string): { cmd: string[]; 
 }
 
 const zigCommand = (sourcePath: string, outputPath: string): { cmd: string[]; signature: string } => {
-  // -femit-bin pins the output path; without it Zig writes lib<name>.<ext>
-  // into the current working directory.
   const flags = ["build-lib", "-dynamic", "-OReleaseFast"]
   return {
     cmd: ["zig", ...flags, `-femit-bin=${outputPath}`, sourcePath],
@@ -93,33 +128,35 @@ const runCompile = async (cmd: string[], cwd?: string): Promise<void> => {
   }
 }
 
-const compileC = async (sourcePath: string, outputPath: string): Promise<void> => {
+const compileC = async (
+  sourcePath: string,
+  outputPath: string,
+  extraFlags: string[] = [],
+): Promise<void> => {
   if (process.platform === "win32") {
     try {
-      await runCompile(cCompilerCommand(sourcePath, outputPath).cmd)
+      await runCompile(cCompilerCommand(sourcePath, outputPath, extraFlags).cmd)
       return
     } catch {
-      const fallbackFlags = ["-shared", "-fPIC", "-O2", `-I${import.meta.dir}`]
+      const fallbackFlags = ["-shared", "-fPIC", "-O2", `-I${import.meta.dir}`, ...extraFlags]
       await runCompile(["gcc", ...fallbackFlags, "-o", outputPath, sourcePath])
       return
     }
   }
-  await runCompile(cCompilerCommand(sourcePath, outputPath).cmd)
+  await runCompile(cCompilerCommand(sourcePath, outputPath, extraFlags).cmd)
 }
 
 const compileMoxy = async (
   sourcePath: string,
   outputPath: string,
   buildDir: string,
+  extraFlags: string[] = [],
 ): Promise<void> => {
   const { $ } = await import("bun")
-
-  // Transpile .mxy to .c via moxy
   const cFile = join(buildDir, basename(sourcePath, ".mxy") + ".c")
   const transpiled = await $`moxy ${sourcePath}`.text()
   await Bun.write(cFile, transpiled)
-
-  await compileC(cFile, outputPath)
+  await compileC(cFile, outputPath, extraFlags)
 }
 
 const compileRust = async (sourcePath: string, outputPath: string): Promise<void> => {
@@ -130,9 +167,6 @@ const compileZig = async (sourcePath: string, outputPath: string): Promise<void>
   await runCompile(zigCommand(sourcePath, outputPath).cmd)
 }
 
-// Cargo converts hyphens in the package name to underscores for the cdylib
-// filename (e.g. "my-hash" → "libmy_hash.dylib"), so we mirror that. [lib].name
-// wins over [package].name when both are set; this matches cargo's own rules.
 const cargoLibName = async (cargoTomlPath: string): Promise<string> => {
   const text = await Bun.file(cargoTomlPath).text()
   let section = ""
@@ -154,7 +188,6 @@ const cargoLibName = async (cargoTomlPath: string): Promise<string> => {
 
 const cargoArtifactPath = (projectDir: string, libName: string): string => {
   const ext = libExtension()
-  // Cargo prefixes Unix shared libs with "lib"; Windows DLLs are bare.
   const filename = process.platform === "win32" ? `${libName}.${ext}` : `lib${libName}.${ext}`
   return join(projectDir, "target", "release", filename)
 }
@@ -182,8 +215,6 @@ const walkRustSources = async (projectDir: string): Promise<string[]> => {
   const walk = async (dir: string): Promise<void> => {
     const entries = await readdir(dir, { withFileTypes: true }).catch(() => [])
     for (const e of entries) {
-      // `target/` is cargo's build output; skipping it avoids re-fingerprinting
-      // megabytes of intermediates on every build.
       if (e.isDirectory()) {
         if (e.name === "target" || e.name === ".git") continue
         await walk(join(dir, e.name))
@@ -257,21 +288,30 @@ const collectExports = async (plan: FilePlan): Promise<FfiFunction[]> => {
   return all
 }
 
-const planSignature = (plan: FilePlan, libPath: string): string => {
+const planSignature = (
+  plan: FilePlan,
+  libPath: string,
+  moduleSignature: string,
+): string => {
   if (plan.kind === "cargo") return cargoSignature
   if (plan.ext === ".rs") return rustcCommand(plan.sourcePath, libPath).signature
   if (plan.ext === ".zig") return zigCommand(plan.sourcePath, libPath).signature
-  return cCompilerCommand(plan.sourcePath, libPath).signature
+  return cCompilerCommand(plan.sourcePath, libPath, [], moduleSignature).signature
 }
 
-const buildOne = async (plan: FilePlan, libPath: string, buildDir: string): Promise<void> => {
+const buildOne = async (
+  plan: FilePlan,
+  libPath: string,
+  buildDir: string,
+  extraFlags: string[],
+): Promise<void> => {
   if (plan.kind === "cargo") {
     await buildCargoProject(plan.projectDir, libPath)
     return
   }
   switch (plan.ext) {
-    case ".c": return compileC(plan.sourcePath, libPath)
-    case ".mxy": return compileMoxy(plan.sourcePath, libPath, buildDir)
+    case ".c": return compileC(plan.sourcePath, libPath, extraFlags)
+    case ".mxy": return compileMoxy(plan.sourcePath, libPath, buildDir, extraFlags)
     case ".rs": return compileRust(plan.sourcePath, libPath)
     case ".zig": return compileZig(plan.sourcePath, libPath)
   }
@@ -296,17 +336,17 @@ export const buildNativeExtensions = async (
   const { mkdir } = await import("fs/promises")
   await mkdir(buildDir, { recursive: true })
 
-  // Copy butter.h alongside the user's sources so #include "butter.h" works
-  // from C and Moxy. Rust and Zig don't need it but the copy is harmless.
+  // Always overwrite butter.h next to the user's sources so feature additions
+  // to the runtime header don't get shadowed by a stale copy from an older
+  // butter install.
   const butterHDest = join(nativeDir, "butter.h")
-  if (!(await Bun.file(butterHDest).exists())) {
-    await Bun.write(butterHDest, Bun.file(BUTTER_H_PATH))
-  }
+  await Bun.write(butterHDest, Bun.file(BUTTER_H_PATH))
+
+  const config = await loadConfig(projectDir).catch(() => null)
+  const nativeConfig = config?.native ?? {}
 
   const allowSkip = process.env.BUTTER_ALLOW_NATIVE_SKIP === "1"
 
-  // Build the list of compile plans first so each plan type (file/cargo) is
-  // handled uniformly below.
   const plans: FilePlan[] = []
   for (const entry of entries) {
     if (entry.isDirectory()) {
@@ -337,7 +377,11 @@ export const buildNativeExtensions = async (
       continue
     }
 
-    const signature = planSignature(plan, libPath)
+    const moduleOpts = nativeConfig[plan.name]
+    const { flags: moduleFlags, signature: moduleSignature } =
+      moduleCompileFlags(moduleOpts, projectDir)
+
+    const signature = planSignature(plan, libPath, moduleSignature)
     const expectedFp = await computeFingerprint(plan, signature)
     const cachedFp = await readFingerprint(libPath)
     const lib = Bun.file(libPath)
@@ -347,7 +391,7 @@ export const buildNativeExtensions = async (
       const label = plan.kind === "cargo" ? `${plan.name} (cargo)` : basename(plan.sourcePath)
       console.log(`  Compiling native module: ${label}`)
       try {
-        await buildOne(plan, libPath, buildDir)
+        await buildOne(plan, libPath, buildDir, moduleFlags)
         if (!(await Bun.file(libPath).exists())) {
           throw new Error(`compiler reported success but ${libPath} was not produced`)
         }
