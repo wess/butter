@@ -205,6 +205,7 @@ jobs:
           gh release download "v${VERSION}" \
             --repo "${{ github.repository }}" \
             --pattern "butter-darwin-arm64.tar.gz" \
+            --pattern "butter-linux-arm64.tar.gz" \
             --pattern "butter-linux-x64.tar.gz" \
             --dir tarballs
 
@@ -213,8 +214,10 @@ jobs:
         run: |
           cd tarballs
           DARWIN_ARM64=$(sha256sum butter-darwin-arm64.tar.gz | cut -d' ' -f1)
+          LINUX_ARM64=$(sha256sum butter-linux-arm64.tar.gz | cut -d' ' -f1)
           LINUX_X64=$(sha256sum butter-linux-x64.tar.gz | cut -d' ' -f1)
           echo "sha_darwin_arm64=${DARWIN_ARM64}" >> "$GITHUB_OUTPUT"
+          echo "sha_linux_arm64=${LINUX_ARM64}" >> "$GITHUB_OUTPUT"
           echo "sha_linux_x64=${LINUX_X64}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout homebrew tap
@@ -229,6 +232,7 @@ jobs:
           REPO: ${{ github.repository }}
           VERSION: ${{ needs.check-version.outputs.version }}
           SHA_DARWIN_ARM64: ${{ steps.shas.outputs.sha_darwin_arm64 }}
+          SHA_LINUX_ARM64: ${{ steps.shas.outputs.sha_linux_arm64 }}
           SHA_LINUX_X64: ${{ steps.shas.outputs.sha_linux_x64 }}
         run: |
           cat > tap/Formula/butter.rb << RUBY
@@ -244,8 +248,14 @@ jobs:
             end
 
             on_linux do
-              url "https://github.com/${REPO}/releases/download/v#{version}/butter-linux-x64.tar.gz"
-              sha256 "${SHA_LINUX_X64}"
+              on_arm do
+                url "https://github.com/${REPO}/releases/download/v#{version}/butter-linux-arm64.tar.gz"
+                sha256 "${SHA_LINUX_ARM64}"
+              end
+              on_intel do
+                url "https://github.com/${REPO}/releases/download/v#{version}/butter-linux-x64.tar.gz"
+                sha256 "${SHA_LINUX_X64}"
+              end
             end
 
             def install
