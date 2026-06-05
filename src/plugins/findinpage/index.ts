@@ -1,26 +1,26 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 const host = (ctx: HostContext): void => {
   ctx.on("find:start", (data: unknown) => {
-    const opts = data as { text: string; forward?: boolean; matchCase?: boolean }
-    const text = opts?.text ?? ""
-    const forward = opts?.forward ?? true
-    const matchCase = opts?.matchCase ?? false
-    const runtime = globalThis.__butterRuntime
+    const opts = data as { text: string; forward?: boolean; matchCase?: boolean };
+    const text = opts?.text ?? "";
+    const forward = opts?.forward ?? true;
+    const matchCase = opts?.matchCase ?? false;
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("find:start", { text, forward, matchCase })
+      runtime.tell("find:start", { text, forward, matchCase });
     }
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("find:stop", () => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("find:stop")
+      runtime.tell("find:stop");
     }
-    return { ok: true }
-  })
-}
+    return { ok: true };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -38,12 +38,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const findinpage: Plugin = {
   name: "findinpage",
   host,
   webview,
-}
+};
 
-export default findinpage
+export default findinpage;

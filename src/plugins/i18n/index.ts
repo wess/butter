@@ -1,91 +1,99 @@
-import { join } from "path"
-import { readdirSync, existsSync } from "fs"
-import type { Plugin, HostContext } from "../../types"
+import { existsSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import type { HostContext, Plugin } from "../../types";
 
-type Translations = Record<string, string>
-type LocaleMap = Record<string, Translations>
+type Translations = Record<string, string>;
+type LocaleMap = Record<string, Translations>;
 
-let locales: LocaleMap = {}
-let currentLocale = "en"
-let fallbackLocale = "en"
+const locales: LocaleMap = {};
+let currentLocale = "en";
+let fallbackLocale = "en";
 
 const detectLocale = (): string => {
-  const env = process.env.LANG || process.env.LC_ALL || process.env.LANGUAGE || ""
-  const match = env.match(/^([a-z]{2})/)
-  return match ? match[1] : "en"
-}
+  const env = process.env.LANG || process.env.LC_ALL || process.env.LANGUAGE || "";
+  const match = env.match(/^([a-z]{2})/);
+  return match?.[1] ?? "en";
+};
 
 const loadLocales = (dir: string): void => {
-  if (!existsSync(dir)) return
+  if (!existsSync(dir)) {
+    return;
+  }
 
-  const files = readdirSync(dir).filter((f) => f.endsWith(".json"))
+  const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
   for (const file of files) {
-    const locale = file.replace(".json", "")
+    const locale = file.replace(".json", "");
     try {
-      const content = require(join(dir, file))
-      locales[locale] = content
+      const content = require(join(dir, file));
+      locales[locale] = content;
     } catch {
       // skip invalid JSON
     }
   }
-}
+};
 
 const translate = (key: string, params?: Record<string, string>): string => {
-  let text = locales[currentLocale]?.[key]
-    ?? locales[fallbackLocale]?.[key]
-    ?? key
+  let text = locales[currentLocale]?.[key] ?? locales[fallbackLocale]?.[key] ?? key;
 
   if (params) {
     for (const [k, v] of Object.entries(params)) {
-      text = text.replaceAll(`{{${k}}}`, v)
+      text = text.replaceAll(`{{${k}}}`, v);
     }
   }
 
-  return text
-}
+  return text;
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("i18n:init", (data: unknown) => {
-    const opts = data as { dir?: string; locale?: string; fallback?: string }
+    const opts = data as { dir?: string; locale?: string; fallback?: string };
 
-    if (opts?.dir) loadLocales(opts.dir)
-    if (opts?.locale) currentLocale = opts.locale
-    if (opts?.fallback) fallbackLocale = opts.fallback
+    if (opts?.dir) {
+      loadLocales(opts.dir);
+    }
+    if (opts?.locale) {
+      currentLocale = opts.locale;
+    }
+    if (opts?.fallback) {
+      fallbackLocale = opts.fallback;
+    }
 
     if (!opts?.locale) {
-      currentLocale = detectLocale()
+      currentLocale = detectLocale();
     }
 
     return {
       ok: true,
       locale: currentLocale,
       available: Object.keys(locales),
-    }
-  })
+    };
+  });
 
   ctx.on("i18n:t", (data: unknown) => {
-    const { key, params } = data as { key: string; params?: Record<string, string> }
-    return { text: translate(key, params) }
-  })
+    const { key, params } = data as { key: string; params?: Record<string, string> };
+    return { text: translate(key, params) };
+  });
 
   ctx.on("i18n:locale", (data: unknown) => {
     if (typeof data === "string") {
-      currentLocale = data
+      currentLocale = data;
     } else {
-      const opts = data as { locale: string }
-      if (opts?.locale) currentLocale = opts.locale
+      const opts = data as { locale: string };
+      if (opts?.locale) {
+        currentLocale = opts.locale;
+      }
     }
-    ctx.send("i18n:changed", { locale: currentLocale })
-    return { ok: true, locale: currentLocale }
-  })
+    ctx.send("i18n:changed", { locale: currentLocale });
+    return { ok: true, locale: currentLocale };
+  });
 
   ctx.on("i18n:all", () => {
     return {
       translations: locales[currentLocale] ?? {},
       locale: currentLocale,
-    }
-  })
-}
+    };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -127,12 +135,12 @@ const webview = (): string => `
     });
   });
 })();
-`
+`;
 
 const i18n: Plugin = {
   name: "i18n",
   host,
   webview,
-}
+};
 
-export default i18n
+export default i18n;

@@ -1,50 +1,60 @@
-import { join, basename } from "path"
-import { mkdir, symlink, chmod } from "fs/promises"
-import { existsSync } from "fs"
-import { platform } from "os"
-import { loadConfig } from "../config"
-import type { Config } from "../types"
+import { existsSync } from "node:fs";
+import { chmod, mkdir, symlink } from "node:fs/promises";
+import { platform } from "node:os";
+import { basename, join } from "node:path";
+import { loadConfig } from "../config";
+import type { Config } from "../types";
 
 // Copy declared sidecar binaries into a `sidecars/` dir adjacent to the
 // main executable inside the bundle, preserving the executable bit.
-const copySidecars = async (config: Config, projectDir: string, destDir: string): Promise<string[]> => {
-  const sidecars = config.bundle?.sidecars ?? []
-  if (sidecars.length === 0) return []
-  await mkdir(destDir, { recursive: true })
-  const copied: string[] = []
-  for (const rel of sidecars) {
-    const src = join(projectDir, rel)
-    if (!existsSync(src)) {
-      console.warn(`  Warning: sidecar not found at ${src} — skipping`)
-      continue
-    }
-    const name = basename(rel)
-    const dest = join(destDir, name)
-    await Bun.write(dest, Bun.file(src))
-    if (process.platform !== "win32") await chmod(dest, 0o755)
-    copied.push(name)
+const copySidecars = async (
+  config: Config,
+  projectDir: string,
+  destDir: string,
+): Promise<string[]> => {
+  const sidecars = config.bundle?.sidecars ?? [];
+  if (sidecars.length === 0) {
+    return [];
   }
-  return copied
-}
+  await mkdir(destDir, { recursive: true });
+  const copied: string[] = [];
+  for (const rel of sidecars) {
+    const src = join(projectDir, rel);
+    if (!existsSync(src)) {
+      console.warn(`  Warning: sidecar not found at ${src} — skipping`);
+      continue;
+    }
+    const name = basename(rel);
+    const dest = join(destDir, name);
+    await Bun.write(dest, Bun.file(src));
+    if (process.platform !== "win32") {
+      await chmod(dest, 0o755);
+    }
+    copied.push(name);
+  }
+  return copied;
+};
 
 // ── macOS ──────────────────────────────────────────────────────────────────
 
 const generateUrlSchemesPlist = (config: Config): string => {
-  const schemes = config.bundle?.urlSchemes
-  if (!schemes || schemes.length === 0) return ""
+  const schemes = config.bundle?.urlSchemes;
+  if (!schemes || schemes.length === 0) {
+    return "";
+  }
 
-  const entries = schemes.map((s) =>
-    `\t\t<dict>\n\t\t\t<key>CFBundleURLName</key>\n\t\t\t<string>${config.bundle?.identifier ?? "com.example.app"}</string>\n\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n\t\t\t\t<string>${s}</string>\n\t\t\t</array>\n\t\t</dict>`,
-  ).join("\n")
+  const entries = schemes
+    .map(
+      (s) =>
+        `\t\t<dict>\n\t\t\t<key>CFBundleURLName</key>\n\t\t\t<string>${config.bundle?.identifier ?? "com.example.app"}</string>\n\t\t\t<key>CFBundleURLSchemes</key>\n\t\t\t<array>\n\t\t\t\t<string>${s}</string>\n\t\t\t</array>\n\t\t</dict>`,
+    )
+    .join("\n");
 
-  return `\t<key>CFBundleURLTypes</key>\n\t<array>\n${entries}\n\t</array>\n`
-}
+  return `\t<key>CFBundleURLTypes</key>\n\t<array>\n${entries}\n\t</array>\n`;
+};
 
 const escapePlistString = (value: string): string =>
-  value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const usageDescriptionKey: Record<string, string> = {
   microphone: "NSMicrophoneUsageDescription",
@@ -57,28 +67,28 @@ const usageDescriptionKey: Record<string, string> = {
   location: "NSLocationUsageDescription",
   bluetooth: "NSBluetoothAlwaysUsageDescription",
   screenCapture: "NSScreenCaptureUsageDescription",
-}
+};
 
 const generateUsageDescriptionsPlist = (config: Config): string => {
-  const usage = config.bundle?.usageDescriptions
-  if (!usage) return ""
+  const usage = config.bundle?.usageDescriptions;
+  if (!usage) {
+    return "";
+  }
   const entries = Object.entries(usage)
     .filter(([k, v]) => usageDescriptionKey[k] && typeof v === "string" && v.length > 0)
     .map(
       ([k, v]) =>
         `\t<key>${usageDescriptionKey[k]}</key>\n\t<string>${escapePlistString(v as string)}</string>`,
-    )
-  return entries.length === 0 ? "" : `${entries.join("\n")}\n`
-}
+    );
+  return entries.length === 0 ? "" : `${entries.join("\n")}\n`;
+};
 
 const generatePlist = (config: Config, executableName: string, hasIcon: boolean): string => {
-  const identifier = config.bundle?.identifier ?? `com.example.${executableName}`
-  const category = config.bundle?.category ?? "public.app-category.utilities"
-  const minSysVersion = config.bundle?.minimumSystemVersion ?? "11.0"
+  const identifier = config.bundle?.identifier ?? `com.example.${executableName}`;
+  const category = config.bundle?.category ?? "public.app-category.utilities";
+  const minSysVersion = config.bundle?.minimumSystemVersion ?? "11.0";
 
-  const iconEntry = hasIcon
-    ? `\t<key>CFBundleIconFile</key>\n\t<string>icon</string>\n`
-    : ""
+  const iconEntry = hasIcon ? `\t<key>CFBundleIconFile</key>\n\t<string>icon</string>\n` : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -106,61 +116,63 @@ ${iconEntry}\t<key>NSHighResolutionCapable</key>
 \t<true/>
 ${generateUsageDescriptionsPlist(config)}${generateUrlSchemesPlist(config)}</dict>
 </plist>
-`
-}
+`;
+};
 
 export const bundleMacApp = async (
   binaryPath: string,
   config: Config,
   projectDir: string,
 ): Promise<string> => {
-  const executableName = basename(binaryPath)
-  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || executableName
-  const appBundlePath = join(projectDir, "dist", `${appName}.app`)
+  const executableName = basename(binaryPath);
+  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || executableName;
+  const appBundlePath = join(projectDir, "dist", `${appName}.app`);
 
-  const macosDir = join(appBundlePath, "Contents", "MacOS")
-  const resourcesDir = join(appBundlePath, "Contents", "Resources")
+  const macosDir = join(appBundlePath, "Contents", "MacOS");
+  const resourcesDir = join(appBundlePath, "Contents", "Resources");
 
-  await mkdir(macosDir, { recursive: true })
-  await mkdir(resourcesDir, { recursive: true })
+  await mkdir(macosDir, { recursive: true });
+  await mkdir(resourcesDir, { recursive: true });
 
   // Copy binary into MacOS/
-  const destBinary = join(macosDir, executableName)
-  await Bun.write(destBinary, Bun.file(binaryPath))
-  await chmod(destBinary, 0o755)
+  const destBinary = join(macosDir, executableName);
+  await Bun.write(destBinary, Bun.file(binaryPath));
+  await chmod(destBinary, 0o755);
 
   // Copy icon if configured
-  let hasIcon = false
+  let hasIcon = false;
   if (config.window.icon) {
-    const iconSrc = join(projectDir, config.window.icon)
+    const iconSrc = join(projectDir, config.window.icon);
     if (existsSync(iconSrc)) {
-      const ext = iconSrc.endsWith(".icns") ? ".icns" : ".png"
-      await Bun.write(join(resourcesDir, `icon${ext}`), Bun.file(iconSrc))
-      hasIcon = true
+      const ext = iconSrc.endsWith(".icns") ? ".icns" : ".png";
+      await Bun.write(join(resourcesDir, `icon${ext}`), Bun.file(iconSrc));
+      hasIcon = true;
     }
   }
 
   // Write Info.plist
-  const plist = generatePlist(config, executableName, hasIcon)
-  await Bun.write(join(appBundlePath, "Contents", "Info.plist"), plist)
+  const plist = generatePlist(config, executableName, hasIcon);
+  await Bun.write(join(appBundlePath, "Contents", "Info.plist"), plist);
 
   // Sidecars go alongside the binary so they're on PATH-adjacent and signing
   // covers them in a single pass.
-  const sidecars = await copySidecars(config, projectDir, join(macosDir, "sidecars"))
-  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
+  const sidecars = await copySidecars(config, projectDir, join(macosDir, "sidecars"));
+  if (sidecars.length > 0) {
+    console.log(`  Sidecars: ${sidecars.join(", ")}`);
+  }
 
-  return appBundlePath
-}
+  return appBundlePath;
+};
 
 // ── Linux AppImage (AppDir structure) ─────────────────────────────────────
 
 const generateDesktopEntry = (config: Config, executableName: string, hasIcon: boolean): string => {
-  const identifier = config.bundle?.identifier ?? `com.example.${executableName}`
-  const category = config.bundle?.category ?? "Utility"
-  const iconLine = hasIcon ? `Icon=${executableName}` : `Icon=application-default-icon`
+  const _identifier = config.bundle?.identifier ?? `com.example.${executableName}`;
+  const category = config.bundle?.category ?? "Utility";
+  const iconLine = hasIcon ? `Icon=${executableName}` : `Icon=application-default-icon`;
 
-  const mimeTypes = (config.bundle?.urlSchemes ?? []).map((s) => `x-scheme-handler/${s}`).join(";")
-  const mimeLine = mimeTypes ? `MimeType=${mimeTypes};\n` : ""
+  const mimeTypes = (config.bundle?.urlSchemes ?? []).map((s) => `x-scheme-handler/${s}`).join(";");
+  const mimeLine = mimeTypes ? `MimeType=${mimeTypes};\n` : "";
 
   return `[Desktop Entry]
 Type=Application
@@ -171,51 +183,53 @@ Categories=${category};
 ${mimeLine}X-AppImage-Name=${config.window.title}
 X-AppImage-Version=1.0.0
 X-AppImage-Arch=x86_64
-`
-}
+`;
+};
 
 export const bundleLinuxAppDir = async (
   binaryPath: string,
   config: Config,
   projectDir: string,
 ): Promise<string> => {
-  const executableName = basename(binaryPath)
-  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || executableName
-  const appDirPath = join(projectDir, "dist", `${appName}.AppDir`)
+  const executableName = basename(binaryPath);
+  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || executableName;
+  const appDirPath = join(projectDir, "dist", `${appName}.AppDir`);
 
-  const usrBinDir = join(appDirPath, "usr", "bin")
-  await mkdir(usrBinDir, { recursive: true })
+  const usrBinDir = join(appDirPath, "usr", "bin");
+  await mkdir(usrBinDir, { recursive: true });
 
   // Copy binary to usr/bin/
-  const destBinary = join(usrBinDir, executableName)
-  await Bun.write(destBinary, Bun.file(binaryPath))
-  await chmod(destBinary, 0o755)
+  const destBinary = join(usrBinDir, executableName);
+  await Bun.write(destBinary, Bun.file(binaryPath));
+  await chmod(destBinary, 0o755);
 
   // AppRun symlink
-  const appRunPath = join(appDirPath, "AppRun")
+  const appRunPath = join(appDirPath, "AppRun");
   if (!existsSync(appRunPath)) {
-    await symlink(`usr/bin/${executableName}`, appRunPath)
+    await symlink(`usr/bin/${executableName}`, appRunPath);
   }
 
   // Copy icon if configured
-  let hasIcon = false
+  let hasIcon = false;
   if (config.window.icon) {
-    const iconSrc = join(projectDir, config.window.icon)
+    const iconSrc = join(projectDir, config.window.icon);
     if (existsSync(iconSrc)) {
-      await Bun.write(join(appDirPath, "icon.png"), Bun.file(iconSrc))
-      hasIcon = true
+      await Bun.write(join(appDirPath, "icon.png"), Bun.file(iconSrc));
+      hasIcon = true;
     }
   }
 
   // Write .desktop file
-  const desktop = generateDesktopEntry(config, executableName, hasIcon)
-  await Bun.write(join(appDirPath, `${executableName}.desktop`), desktop)
+  const desktop = generateDesktopEntry(config, executableName, hasIcon);
+  await Bun.write(join(appDirPath, `${executableName}.desktop`), desktop);
 
-  const sidecars = await copySidecars(config, projectDir, join(usrBinDir, "sidecars"))
-  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
+  const sidecars = await copySidecars(config, projectDir, join(usrBinDir, "sidecars"));
+  if (sidecars.length > 0) {
+    console.log(`  Sidecars: ${sidecars.join(", ")}`);
+  }
 
-  return appDirPath
-}
+  return appDirPath;
+};
 
 // ── Windows ───────────────────────────────────────────────────────────────
 
@@ -224,59 +238,63 @@ export const bundleWindowsApp = async (
   config: Config,
   projectDir: string,
 ): Promise<string> => {
-  const executableName = basename(binaryPath)
-  const appName = config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || basename(binaryPath, ".exe")
-  const bundlePath = join(projectDir, "dist", appName)
+  const executableName = basename(binaryPath);
+  const appName =
+    config.window.title.replace(/[^a-zA-Z0-9 ]/g, "").trim() || basename(binaryPath, ".exe");
+  const bundlePath = join(projectDir, "dist", appName);
 
-  await mkdir(bundlePath, { recursive: true })
+  await mkdir(bundlePath, { recursive: true });
 
-  const destBinary = join(bundlePath, executableName)
-  await Bun.write(destBinary, Bun.file(binaryPath))
+  const destBinary = join(bundlePath, executableName);
+  await Bun.write(destBinary, Bun.file(binaryPath));
 
   // Copy icon if configured (.ico for Windows)
   if (config.window.icon) {
-    const iconSrc = join(projectDir, config.window.icon)
+    const iconSrc = join(projectDir, config.window.icon);
     if (existsSync(iconSrc)) {
-      const ext = iconSrc.split(".").pop() ?? "ico"
-      await Bun.write(join(bundlePath, `icon.${ext}`), Bun.file(iconSrc))
+      const ext = iconSrc.split(".").pop() ?? "ico";
+      await Bun.write(join(bundlePath, `icon.${ext}`), Bun.file(iconSrc));
     }
   }
 
-  const sidecars = await copySidecars(config, projectDir, join(bundlePath, "sidecars"))
-  if (sidecars.length > 0) console.log(`  Sidecars: ${sidecars.join(", ")}`)
+  const sidecars = await copySidecars(config, projectDir, join(bundlePath, "sidecars"));
+  if (sidecars.length > 0) {
+    console.log(`  Sidecars: ${sidecars.join(", ")}`);
+  }
 
-  return bundlePath
-}
+  return bundlePath;
+};
 
 // ── bundle command entry point ─────────────────────────────────────────────
 
 export const runBundle = async (projectDir: string): Promise<void> => {
-  const config = await loadConfig(projectDir)
-  const appName = config.window.title.toLowerCase().replace(/[^a-z0-9]/g, "") || basename(projectDir)
-  const os = platform()
-  const ext = os === "win32" ? ".exe" : ""
-  const binaryPath = join(projectDir, "dist", `${appName}${ext}`)
+  const config = await loadConfig(projectDir);
+  const appName =
+    config.window.title.toLowerCase().replace(/[^a-z0-9]/g, "") || basename(projectDir);
+  const os = platform();
+  const ext = os === "win32" ? ".exe" : "";
+  const binaryPath = join(projectDir, "dist", `${appName}${ext}`);
 
   if (!existsSync(binaryPath)) {
-    console.error(`Binary not found at ${binaryPath}. Run "butter compile" first.`)
-    process.exit(1)
+    console.error(`Binary not found at ${binaryPath}. Run "butter compile" first.`);
+    process.exit(1);
   }
 
   if (os === "darwin") {
-    console.log(`\nBundling "${config.window.title}" for macOS...`)
-    const appPath = await bundleMacApp(binaryPath, config, projectDir)
-    console.log(`  Bundle: ${appPath}`)
+    console.log(`\nBundling "${config.window.title}" for macOS...`);
+    const appPath = await bundleMacApp(binaryPath, config, projectDir);
+    console.log(`  Bundle: ${appPath}`);
   } else if (os === "linux") {
-    console.log(`\nBundling "${config.window.title}" for Linux...`)
-    const appDirPath = await bundleLinuxAppDir(binaryPath, config, projectDir)
-    console.log(`  AppDir: ${appDirPath}`)
-    console.log(`  To create a distributable .AppImage, run appimagetool on the AppDir above.`)
+    console.log(`\nBundling "${config.window.title}" for Linux...`);
+    const appDirPath = await bundleLinuxAppDir(binaryPath, config, projectDir);
+    console.log(`  AppDir: ${appDirPath}`);
+    console.log(`  To create a distributable .AppImage, run appimagetool on the AppDir above.`);
   } else if (os === "win32") {
-    console.log(`\nBundling "${config.window.title}" for Windows...`)
-    const bundlePath = await bundleWindowsApp(binaryPath, config, projectDir)
-    console.log(`  Bundle: ${bundlePath}`)
+    console.log(`\nBundling "${config.window.title}" for Windows...`);
+    const bundlePath = await bundleWindowsApp(binaryPath, config, projectDir);
+    console.log(`  Bundle: ${bundlePath}`);
   } else {
-    console.error(`Bundle is not yet supported on ${os}.`)
-    process.exit(1)
+    console.error(`Bundle is not yet supported on ${os}.`);
+    process.exit(1);
   }
-}
+};

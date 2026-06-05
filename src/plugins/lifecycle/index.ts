@@ -1,24 +1,24 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 const host = (ctx: HostContext): void => {
   const emit = (action: string, data?: unknown) => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.send(action, data ?? {})
+      runtime.send(action, data ?? {});
     }
-  }
+  };
 
   process.on("beforeExit", () => {
-    emit("app:beforequit")
-  })
+    emit("app:beforequit");
+  });
 
   process.on("SIGHUP", () => {
-    emit("app:willquit")
-  })
+    emit("app:willquit");
+  });
 
   process.on("SIGTERM", () => {
-    emit("app:willquit")
-  })
+    emit("app:willquit");
+  });
 
   ctx.on("app:getinfo", () => {
     return {
@@ -27,19 +27,19 @@ const host = (ctx: HostContext): void => {
       platform: process.platform,
       arch: process.arch,
       pid: process.pid,
-    }
-  })
+    };
+  });
 
   ctx.on("app:activate", () => {
-    emit("app:activate")
-    return { ok: true }
-  })
+    emit("app:activate");
+    return { ok: true };
+  });
 
   ctx.on("app:reopen", () => {
-    emit("app:reopen")
-    return { ok: true }
-  })
-}
+    emit("app:reopen");
+    return { ok: true };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -77,12 +77,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const lifecycle: Plugin = {
   name: "lifecycle",
   host,
   webview,
-}
+};
 
-export default lifecycle
+export default lifecycle;

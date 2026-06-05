@@ -1,39 +1,39 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 const host = (ctx: HostContext): void => {
   ctx.on("nav:back", () => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("nav:back")
+      runtime.tell("nav:back");
     }
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("nav:forward", () => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("nav:forward")
+      runtime.tell("nav:forward");
     }
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("nav:reload", () => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("nav:reload")
+      runtime.tell("nav:reload");
     }
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("nav:loadurl", (data: unknown) => {
-    const url = typeof data === "string" ? data : (data as { url: string })?.url ?? ""
-    const runtime = globalThis.__butterRuntime
+    const url = typeof data === "string" ? data : ((data as { url: string })?.url ?? "");
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("nav:loadurl", { url })
+      runtime.tell("nav:loadurl", { url });
     }
-    return { ok: true }
-  })
-}
+    return { ok: true };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -53,12 +53,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const navigation: Plugin = {
   name: "navigation",
   host,
   webview,
-}
+};
 
-export default navigation
+export default navigation;

@@ -1,60 +1,75 @@
-import { join } from "path"
-import { tmpdir } from "os"
-import { mkdirSync } from "fs"
-import type { Plugin, HostContext } from "../../types"
+import { mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { HostContext, Plugin } from "../../types";
 
 type UpdateManifest = {
-  version: string
-  url: string
-  notes?: string
-}
+  version: string;
+  url: string;
+  notes?: string;
+};
 
 type CheckResult =
   | { available: false }
-  | { available: true; version: string; url: string; notes?: string }
+  | { available: true; version: string; url: string; notes?: string };
 
 const parseVersion = (v: string): number[] =>
-  v.replace(/^v/, "").split(".").map((n) => parseInt(n, 10) || 0)
+  v
+    .replace(/^v/, "")
+    .split(".")
+    .map((n) => parseInt(n, 10) || 0);
 
 const isNewer = (remote: string, current: string): boolean => {
-  const r = parseVersion(remote)
-  const c = parseVersion(current)
+  const r = parseVersion(remote);
+  const c = parseVersion(current);
   for (let i = 0; i < Math.max(r.length, c.length); i++) {
-    const rv = r[i] ?? 0
-    const cv = c[i] ?? 0
-    if (rv > cv) return true
-    if (rv < cv) return false
+    const rv = r[i] ?? 0;
+    const cv = c[i] ?? 0;
+    if (rv > cv) {
+      return true;
+    }
+    if (rv < cv) {
+      return false;
+    }
   }
-  return false
-}
+  return false;
+};
 
 const fetchManifest = async (url: string): Promise<UpdateManifest> => {
-  const res = await fetch(url)
-  if (!res.ok) throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`)
-  return res.json() as Promise<UpdateManifest>
-}
+  const res = await fetch(url);
+  if (!res.ok) {
+    throw new Error(`Manifest fetch failed: ${res.status} ${res.statusText}`);
+  }
+  return res.json() as Promise<UpdateManifest>;
+};
 
-let cachedVersion: string | null = null
+let cachedVersion: string | null = null;
 
 const currentVersion = (): string => {
-  if (cachedVersion !== null) return cachedVersion
-  try {
-    const pkg = require(join(process.cwd(), "package.json"))
-    cachedVersion = pkg.version ?? "0.0.0"
-  } catch {
-    cachedVersion = "0.0.0"
+  if (cachedVersion !== null) {
+    return cachedVersion;
   }
-  return cachedVersion
-}
+  let resolved = "0.0.0";
+  try {
+    const pkg = require(join(process.cwd(), "package.json"));
+    resolved = pkg.version ?? "0.0.0";
+  } catch {
+    resolved = "0.0.0";
+  }
+  cachedVersion = resolved;
+  return resolved;
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("updater:check", async (data: unknown) => {
-    const { url } = data as { url: string }
-    if (!url) return { ok: false, error: "updater:check requires { url: string }" }
+    const { url } = data as { url: string };
+    if (!url) {
+      return { ok: false, error: "updater:check requires { url: string }" };
+    }
 
     try {
-      const manifest = await fetchManifest(url)
-      const current = currentVersion()
+      const manifest = await fetchManifest(url);
+      const current = currentVersion();
 
       if (isNewer(manifest.version, current)) {
         const result: CheckResult = {
@@ -62,100 +77,106 @@ const host = (ctx: HostContext): void => {
           version: manifest.version,
           url: manifest.url,
           notes: manifest.notes,
-        }
-        return { ok: true, ...result }
+        };
+        return { ok: true, ...result };
       }
 
-      return { ok: true, available: false }
+      return { ok: true, available: false };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("updater:download", async (data: unknown) => {
-    const { url, filename } = data as { url: string; filename?: string }
-    if (!url) return { ok: false, error: "updater:download requires { url: string }" }
+    const { url, filename } = data as { url: string; filename?: string };
+    if (!url) {
+      return { ok: false, error: "updater:download requires { url: string }" };
+    }
 
     try {
-      const res = await fetch(url)
-      if (!res.ok) throw new Error(`Download failed: ${res.status} ${res.statusText}`)
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+      }
 
-      const destDir = join(tmpdir(), "butter-update")
-      mkdirSync(destDir, { recursive: true })
+      const destDir = join(tmpdir(), "butter-update");
+      mkdirSync(destDir, { recursive: true });
 
-      const name = filename ?? url.split("/").pop() ?? "update"
-      const destPath = join(destDir, name)
+      const name = filename ?? url.split("/").pop() ?? "update";
+      const destPath = join(destDir, name);
 
-      const buffer = await res.arrayBuffer()
-      await Bun.write(destPath, buffer)
+      const buffer = await res.arrayBuffer();
+      await Bun.write(destPath, buffer);
 
-      return { ok: true, path: destPath }
+      return { ok: true, path: destPath };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("updater:install", async (data: unknown) => {
-    const { path } = data as { path: string }
-    if (!path) return { ok: false, error: "updater:install requires { path: string }" }
+    const { path } = data as { path: string };
+    if (!path) {
+      return { ok: false, error: "updater:install requires { path: string }" };
+    }
 
     try {
-      const platform = process.platform
-      const ext = path.split(".").pop()?.toLowerCase() ?? ""
+      const platform = process.platform;
+      const ext = path.split(".").pop()?.toLowerCase() ?? "";
 
       if (platform === "darwin") {
         if (ext === "dmg") {
           // Mount DMG and open the volume so the user can drag to Applications.
-          await Bun.$`hdiutil attach ${path} -nobrowse -quiet`
-          await Bun.$`open ${path}`
-          return { ok: true, action: "opened" }
+          await Bun.$`hdiutil attach ${path} -nobrowse -quiet`;
+          await Bun.$`open ${path}`;
+          return { ok: true, action: "opened" };
         } else if (ext === "zip") {
-          const destDir = join(tmpdir(), "butter-update-extracted")
-          await Bun.$`unzip -o ${path} -d ${destDir}`.quiet()
+          const destDir = join(tmpdir(), "butter-update-extracted");
+          await Bun.$`unzip -o ${path} -d ${destDir}`.quiet();
           // Find .app in extracted contents
-          const result = await Bun.$`find ${destDir} -maxdepth 2 -name "*.app" -type d`.text()
-          const appPath = result.trim().split("\n")[0]
+          const result = await Bun.$`find ${destDir} -maxdepth 2 -name "*.app" -type d`.text();
+          const appPath = result.trim().split("\n")[0];
           if (appPath) {
-            await Bun.$`open ${appPath}`
-            return { ok: true, action: "launched", path: appPath }
+            await Bun.$`open ${appPath}`;
+            return { ok: true, action: "launched", path: appPath };
           }
-          return { ok: false, error: "No .app found in archive" }
+          return { ok: false, error: "No .app found in archive" };
         }
       } else if (platform === "linux") {
         if (ext === "appimage") {
-          const { chmod } = await import("fs/promises")
-          await chmod(path, 0o755)
-          return { ok: true, action: "ready", path }
+          const { chmod } = await import("node:fs/promises");
+          await chmod(path, 0o755);
+          return { ok: true, action: "ready", path };
         } else if (ext === "deb") {
-          await Bun.$`sudo dpkg -i ${path}`.quiet()
-          return { ok: true, action: "installed" }
+          await Bun.$`sudo dpkg -i ${path}`.quiet();
+          return { ok: true, action: "installed" };
         }
       } else if (platform === "win32") {
         if (ext === "exe" || ext === "msi") {
-          await Bun.$`start ${path}`
-          return { ok: true, action: "launched" }
+          await Bun.$`start ${path}`;
+          return { ok: true, action: "launched" };
         }
       }
 
-      return { ok: false, error: `Unsupported update format: .${ext}` }
+      return { ok: false, error: `Unsupported update format: .${ext}` };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("updater:restart", async () => {
     try {
-      const execPath = process.execPath
-      const args = process.argv.slice(1)
+      const execPath = process.execPath;
+      const args = process.argv.slice(1);
       // Spawn new process and exit current
-      Bun.spawn([execPath, ...args], { stdio: "inherit" })
-      setTimeout(() => process.exit(0), 500)
-      return { ok: true }
+      Bun.spawn([execPath, ...args], { stdio: ["inherit", "inherit", "inherit"] });
+      setTimeout(() => process.exit(0), 500);
+      return { ok: true };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
-}
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -175,12 +196,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const autoupdater: Plugin = {
   name: "autoupdater",
   host,
   webview,
-}
+};
 
-export default autoupdater
+export default autoupdater;

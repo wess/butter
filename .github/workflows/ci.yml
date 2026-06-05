@@ -11,6 +11,23 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: lint + typecheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Biome lint + format check
+        run: bun run lint
+
+      - name: Type-check (tsc --noEmit)
+        run: bun run typecheck
+
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -57,3 +74,17 @@ jobs:
 
       - name: Doctor smoke test
         run: bun src/cli/index.ts doctor
+
+      # Exercise the real compile path on the example app. The release workflow
+      # ships binaries this way, but CI never actually built one — this catches
+      # shim/bundle/embed regressions that the unit tests can't. Windows is
+      # skipped for the same reason the shim verification above is (no
+      # WebView2Loader.lib on the runner by default).
+      - name: Build example app (butter compile + bundle)
+        if: runner.os != 'Windows'
+        working-directory: example/hello
+        run: |
+          bun install
+          bun ../../src/cli/index.ts compile
+          bun ../../src/cli/index.ts bundle
+          ls -la dist

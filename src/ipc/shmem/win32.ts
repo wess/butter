@@ -1,13 +1,7 @@
-import { dlopen, FFIType, toBuffer } from "bun:ffi"
+import { dlopen, FFIType, type Pointer, toBuffer } from "bun:ffi";
+import type { SharedRegion } from "./types";
 
-export type SharedRegion = {
-  name: string
-  buffer: Uint8Array
-  pointer: number
-  size: number
-  semToBun: bigint
-  semToShim: bigint
-}
+export type { SharedRegion };
 
 // HANDLE values on Win64 are 64-bit and can have high bits set
 // (e.g. INVALID_HANDLE_VALUE = 0xFFFFFFFFFFFFFFFF), so they must use
@@ -50,101 +44,114 @@ const kernel32 = dlopen("kernel32.dll", {
     args: [FFIType.u64],
     returns: FFIType.i32,
   },
-})
+});
 
-const { symbols: k32 } = kernel32
+const { symbols: k32 } = kernel32;
 
-const INVALID_HANDLE_VALUE = 0xFFFFFFFFFFFFFFFFn
-const PAGE_READWRITE = 0x04
-const FILE_MAP_ALL_ACCESS = 0x000F001F
-const EVENT_MODIFY_STATE = 0x0002
-const SYNCHRONIZE = 0x00100000
-const WAIT_OBJECT_0 = 0x00000000
+const INVALID_HANDLE_VALUE = 0xffffffffffffffffn;
+const PAGE_READWRITE = 0x04;
+const FILE_MAP_ALL_ACCESS = 0x000f001f;
+const EVENT_MODIFY_STATE = 0x0002;
+const SYNCHRONIZE = 0x00100000;
+const WAIT_OBJECT_0 = 0x00000000;
 
-const cstr = (s: string): Buffer => Buffer.from(s + "\0")
+const cstr = (s: string): Buffer => Buffer.from(`${s}\0`);
 
 const createMapping = (name: string, size: number): { pointer: number; handle: bigint } => {
   const handle = k32.CreateFileMappingA(
-    INVALID_HANDLE_VALUE, null, PAGE_READWRITE, 0, size, cstr(name),
-  ) as bigint
-  if (!handle) throw new Error(`CreateFileMappingA failed for ${name}`)
-
-  const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number
-  if (!pointer) {
-    k32.CloseHandle(handle)
-    throw new Error(`MapViewOfFile failed for ${name}`)
+    INVALID_HANDLE_VALUE,
+    null,
+    PAGE_READWRITE,
+    0,
+    size,
+    cstr(name),
+  ) as bigint;
+  if (!handle) {
+    throw new Error(`CreateFileMappingA failed for ${name}`);
   }
 
-  return { pointer, handle }
-}
+  const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number;
+  if (!pointer) {
+    k32.CloseHandle(handle);
+    throw new Error(`MapViewOfFile failed for ${name}`);
+  }
+
+  return { pointer, handle };
+};
 
 const openMapping = (name: string, size: number): { pointer: number; handle: bigint } => {
-  const handle = k32.OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, cstr(name)) as bigint
-  if (!handle) throw new Error(`OpenFileMappingA failed for ${name}`)
-
-  const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number
-  if (!pointer) {
-    k32.CloseHandle(handle)
-    throw new Error(`MapViewOfFile failed for ${name}`)
+  const handle = k32.OpenFileMappingA(FILE_MAP_ALL_ACCESS, 0, cstr(name)) as bigint;
+  if (!handle) {
+    throw new Error(`OpenFileMappingA failed for ${name}`);
   }
 
-  return { pointer, handle }
-}
+  const pointer = k32.MapViewOfFile(handle, FILE_MAP_ALL_ACCESS, 0, 0, size) as number;
+  if (!pointer) {
+    k32.CloseHandle(handle);
+    throw new Error(`MapViewOfFile failed for ${name}`);
+  }
 
-const handles = new Map<string, { map: bigint; pointer: number; evtTb: bigint; evtTs: bigint }>()
+  return { pointer, handle };
+};
+
+const handles = new Map<string, { map: bigint; pointer: number; evtTb: bigint; evtTs: bigint }>();
 
 export const createSharedRegion = (name: string, size: number): SharedRegion => {
-  const { pointer, handle } = createMapping(name, size)
-  const buffer = new Uint8Array(toBuffer(pointer, 0, size).buffer, 0, size)
+  const { pointer, handle } = createMapping(name, size);
+  const buffer = new Uint8Array(toBuffer(pointer as Pointer, 0, size).buffer, 0, size);
 
-  const evtTb = k32.CreateEventA(null, 0, 0, cstr(`${name}_tb`)) as bigint
-  const evtTs = k32.CreateEventA(null, 0, 0, cstr(`${name}_ts`)) as bigint
+  const evtTb = k32.CreateEventA(null, 0, 0, cstr(`${name}_tb`)) as bigint;
+  const evtTs = k32.CreateEventA(null, 0, 0, cstr(`${name}_ts`)) as bigint;
 
-  if (!evtTb || !evtTs) throw new Error(`CreateEventA failed for ${name}`)
+  if (!evtTb || !evtTs) {
+    throw new Error(`CreateEventA failed for ${name}`);
+  }
 
-  handles.set(name, { map: handle, pointer, evtTb, evtTs })
+  handles.set(name, { map: handle, pointer, evtTb, evtTs });
 
-  return { name, buffer, pointer, size, semToBun: evtTb, semToShim: evtTs }
-}
+  return { name, buffer, pointer, size, semToBun: evtTb, semToShim: evtTs };
+};
 
 export const openSharedRegion = (name: string, size: number): SharedRegion => {
-  const { pointer, handle } = openMapping(name, size)
-  const buffer = new Uint8Array(toBuffer(pointer, 0, size).buffer, 0, size)
+  const { pointer, handle } = openMapping(name, size);
+  const buffer = new Uint8Array(toBuffer(pointer as Pointer, 0, size).buffer, 0, size);
 
-  const evtTb = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_tb`)) as bigint
-  const evtTs = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_ts`)) as bigint
+  const evtTb = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_tb`)) as bigint;
+  const evtTs = k32.OpenEventA(EVENT_MODIFY_STATE | SYNCHRONIZE, 0, cstr(`${name}_ts`)) as bigint;
 
-  if (!evtTb || !evtTs) throw new Error(`OpenEventA failed for ${name}`)
+  if (!evtTb || !evtTs) {
+    throw new Error(`OpenEventA failed for ${name}`);
+  }
 
-  handles.set(name, { map: handle, pointer, evtTb, evtTs })
+  handles.set(name, { map: handle, pointer, evtTb, evtTs });
 
-  return { name, buffer, pointer, size, semToBun: evtTb, semToShim: evtTs }
-}
+  return { name, buffer, pointer, size, semToBun: evtTb, semToShim: evtTs };
+};
 
 export const signalToBun = (region: SharedRegion): void => {
-  k32.SetEvent(region.semToBun)
-}
+  k32.SetEvent(region.semToBun as bigint);
+};
 
 export const signalToShim = (region: SharedRegion): void => {
-  k32.SetEvent(region.semToShim)
-}
+  k32.SetEvent(region.semToShim as bigint);
+};
 
 export const waitForBunSignal = (region: SharedRegion): void => {
-  k32.WaitForSingleObject(region.semToBun, 0xFFFFFFFF)
-}
+  k32.WaitForSingleObject(region.semToBun as bigint, 0xffffffff);
+};
 
 export const tryWaitForShimSignal = (region: SharedRegion): boolean => {
-  const result = k32.WaitForSingleObject(region.semToShim, 0) as number
-  return result === WAIT_OBJECT_0
-}
+  const result = k32.WaitForSingleObject(region.semToShim as bigint, 0) as number;
+  return result === WAIT_OBJECT_0;
+};
 
 export const destroySharedRegion = (name: string): void => {
-  const h = handles.get(name)
+  const h = handles.get(name);
   if (h) {
-    k32.UnmapViewOfFile(h.pointer)
-    k32.CloseHandle(h.evtTb)
-    k32.CloseHandle(h.evtTs)
-    k32.CloseHandle(h.map)
-    handles.delete(name)
+    k32.UnmapViewOfFile(h.pointer as Pointer);
+    k32.CloseHandle(h.evtTb);
+    k32.CloseHandle(h.evtTs);
+    k32.CloseHandle(h.map);
+    handles.delete(name);
   }
-}
+};

@@ -1,4 +1,5 @@
 import { test, expect, describe } from "bun:test";
+import { resolveMacSignOptions } from "../src/cli/sign";
 
 // Replicate parseArgs from src/cli/sign.ts (not exported)
 
@@ -126,5 +127,77 @@ describe("sign parseArgs", () => {
     const opts = parseArgs(["--unknown", "val", "--identity", "ID"]);
     expect(opts.identity).toBe("ID");
     expect((opts as Record<string, unknown>)["unknown"]).toBeUndefined();
+  });
+});
+
+describe("resolveMacSignOptions", () => {
+  test("CLI flags win over config", () => {
+    const resolved = resolveMacSignOptions(
+      { identity: "cli-id", notarize: true, appleId: "cli@x", teamId: "T", password: "p" },
+      { signingIdentity: "cfg-id", appleId: "cfg@x", teamId: "T2", appleIdPassword: "pp" },
+    );
+    expect(resolved.identity).toBe("cli-id");
+    expect(resolved.appleId).toBe("cli@x");
+  });
+
+  test("falls back to config when CLI flag absent", () => {
+    const resolved = resolveMacSignOptions(
+      {},
+      {
+        signingIdentity: "cfg-id",
+        appleId: "cfg@x",
+        teamId: "T2",
+        appleIdPassword: "pp",
+        notarize: true,
+      },
+    );
+    expect(resolved.identity).toBe("cfg-id");
+    expect(resolved.notarize).toBe(true);
+  });
+
+  test("notarize=true but missing creds falls back to false", () => {
+    // The flag is present but appleId/teamId/password aren't — the sign step
+    // can't do anything useful, so we resolve to "skip notarization".
+    const resolved = resolveMacSignOptions(
+      {},
+      { signingIdentity: "id", notarize: true },
+    );
+    expect(resolved.notarize).toBe(false);
+  });
+
+  test("hardenedRuntime defaults to true when notarizing", () => {
+    const resolved = resolveMacSignOptions(
+      {},
+      {
+        signingIdentity: "id",
+        appleId: "a@b",
+        teamId: "T",
+        appleIdPassword: "pw",
+        notarize: true,
+      },
+    );
+    expect(resolved.hardenedRuntime).toBe(true);
+    expect(resolved.notarize).toBe(true);
+  });
+
+  test("hardenedRuntime defaults to false for ad-hoc", () => {
+    // No identity → ad-hoc. Bun's JIT can't run with Hardened Runtime unless
+    // we ship entitlements, and we don't on the ad-hoc path.
+    const resolved = resolveMacSignOptions({}, undefined);
+    expect(resolved.hardenedRuntime).toBe(false);
+  });
+
+  test("hardenedRuntime explicit override wins", () => {
+    const resolved = resolveMacSignOptions(
+      { hardenedRuntime: false },
+      {
+        signingIdentity: "id",
+        appleId: "a@b",
+        teamId: "T",
+        appleIdPassword: "pw",
+        notarize: true,
+      },
+    );
+    expect(resolved.hardenedRuntime).toBe(false);
   });
 });

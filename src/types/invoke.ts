@@ -1,4 +1,4 @@
-import type { InvokeMap } from "./index"
+import type { InvokeMap } from "./index";
 
 // Type-safe invoke wrapper
 export const createTypedInvoke = <T extends InvokeMap>() => {
@@ -8,7 +8,7 @@ export const createTypedInvoke = <T extends InvokeMap>() => {
       data: T[K]["input"],
       opts?: { timeout?: number },
     ): Promise<T[K]["output"]> => {
-      return (globalThis as any).butter.invoke(action as string, data, opts)
+      return (globalThis as any).butter.invoke(action as string, data, opts);
     },
-  }
-}
+  };
+};

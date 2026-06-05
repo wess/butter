@@ -12,22 +12,26 @@
  *   const crypto = await native<CryptoNative>("crypto")
  */
 
-import { join } from "path"
+import { join } from "node:path";
 
 export const native = async <T = Record<string, (...args: unknown[]) => unknown>>(
   moduleName: string,
 ): Promise<T> => {
   // Look for the compiled bindings in .butter/native/
-  const cwd = process.cwd()
-  const bindingsPath = join(cwd, ".butter", "native", `${moduleName}.ts`)
-  const libPath = join(cwd, ".butter", "native", `${moduleName}.${libExt()}`)
+  const cwd = process.cwd();
+  const bindingsPath = join(cwd, ".butter", "native", `${moduleName}.ts`);
+  const libPath = join(cwd, ".butter", "native", `${moduleName}.${libExt()}`);
 
-  const mod = await import(bindingsPath)
-  return mod.load(libPath) as T
-}
+  const mod = await import(bindingsPath);
+  return mod.load(libPath) as T;
+};
 
 const libExt = (): string => {
-  if (process.platform === "darwin") return "dylib"
-  if (process.platform === "win32") return "dll"
-  return "so"
-}
+  if (process.platform === "darwin") {
+    return "dylib";
+  }
+  if (process.platform === "win32") {
+    return "dll";
+  }
+  return "so";
+};

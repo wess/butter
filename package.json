@@ -1,6 +1,6 @@
 {
   "name": "butterframework",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "type": "module",
   "description": "A lightweight desktop app framework. Native webview, TypeScript on both sides, single-file binary output.",
   "license": "MIT",
@@ -37,13 +37,18 @@
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.16",
     "@types/bun": "latest"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "scripts": {
-    "test": "bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts tests/plugins.test.ts tests/dialog.test.ts tests/native.test.ts tests/cli.test.ts tests/allowlist.test.ts tests/bundle.test.ts tests/sign.test.ts tests/streaming.test.ts tests/window.test.ts tests/ipcround.test.ts tests/ring.test.ts tests/devloop.test.ts tests/mcp.test.ts tests/mcpserver.test.ts && bun test tests/shmemwin.test.ts && bun test tests/shmem.test.ts"
+    "test": "bun test tests/types.test.ts tests/config.test.ts tests/protocol.test.ts tests/ipc.test.ts tests/menu.test.ts tests/runtime.test.ts tests/shim.test.ts tests/doctor.test.ts tests/plugins.test.ts tests/dialog.test.ts tests/native.test.ts tests/cli.test.ts tests/allowlist.test.ts tests/bundle.test.ts tests/package.test.ts tests/sign.test.ts tests/streaming.test.ts tests/window.test.ts tests/ipcround.test.ts tests/ring.test.ts tests/devloop.test.ts tests/mcp.test.ts tests/mcpserver.test.ts && bun test tests/shmemwin.test.ts && bun test tests/shmem.test.ts",
+    "lint": "biome check src",
+    "format": "biome format --write src tests",
+    "check": "biome check --write src",
+    "typecheck": "tsc --noEmit"
   },
   "engines": {
     "bun": ">=1.2.0"

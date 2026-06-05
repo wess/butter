@@ -1,30 +1,30 @@
-export type InvokeMap = Record<string, { input: unknown; output: unknown }>
+export type InvokeMap = Record<string, { input: unknown; output: unknown }>;
 
 export type WindowOptions = {
-  title: string
-  width: number
-  height: number
-  icon?: string
-  x?: number
-  y?: number
-  minWidth?: number
-  minHeight?: number
-  resizable?: boolean
-  frameless?: boolean
-  transparent?: boolean
-  alwaysOnTop?: boolean
-  fullscreen?: boolean
+  title: string;
+  width: number;
+  height: number;
+  icon?: string;
+  x?: number;
+  y?: number;
+  minWidth?: number;
+  minHeight?: number;
+  resizable?: boolean;
+  frameless?: boolean;
+  transparent?: boolean;
+  alwaysOnTop?: boolean;
+  fullscreen?: boolean;
   // Translucent system material applied to the window background.
   //   vibrancy — NSVisualEffectView on macOS
   //   mica / acrylic / tabbed — DWM system backdrop on Windows 11
   // Linux is best-effort (no equivalent in WebKitGTK); ignored if not supported.
-  material?: "vibrancy" | "mica" | "acrylic" | "tabbed" | "none"
-}
+  material?: "vibrancy" | "mica" | "acrylic" | "tabbed" | "none";
+};
 
 export type BuildOptions = {
-  entry: string
-  host: string
-}
+  entry: string;
+  host: string;
+};
 
 /**
  * Privacy usage descriptions written into the macOS Info.plist when bundling.
@@ -34,29 +34,65 @@ export type BuildOptions = {
  * Each key here maps to its NS*UsageDescription Info.plist key.
  */
 export type UsageDescriptions = {
-  microphone?: string
-  camera?: string
-  appleEvents?: string
-  calendar?: string
-  contacts?: string
-  reminders?: string
-  photos?: string
-  location?: string
-  bluetooth?: string
-  screenCapture?: string
-}
+  microphone?: string;
+  camera?: string;
+  appleEvents?: string;
+  calendar?: string;
+  contacts?: string;
+  reminders?: string;
+  photos?: string;
+  location?: string;
+  bluetooth?: string;
+  screenCapture?: string;
+};
+
+// macOS code-signing / notarization settings. Values can use `{ENV_VAR}`
+// placeholders in butter.yaml; the loader substitutes from process.env. An
+// empty result (missing env var) becomes undefined so the sign step skips
+// gracefully when credentials aren't available (e.g. PR builds vs releases).
+//
+// Defaults applied by sign/bundle:
+//   hardenedRuntime — true when notarize=true (Apple requires it), false
+//                     otherwise (ad-hoc signing doesn't need it, and Bun's
+//                     JIT can't run inside Hardened Runtime without the
+//                     `allow-jit` entitlement).
+//   allowJit        — true by default. When set, sign generates an
+//                     entitlements plist with allow-jit and
+//                     allow-unsigned-executable-memory so Bun's
+//                     JavaScriptCore JIT survives hardened-runtime signing.
+export type MacOsBundleOptions = {
+  signingIdentity?: string;
+  entitlements?: string;
+  hardenedRuntime?: boolean;
+  notarize?: boolean;
+  appleId?: string;
+  teamId?: string;
+  appleIdPassword?: string;
+  allowJit?: boolean;
+  dmg?: {
+    volumeName?: string;
+    windowSize?: [number, number];
+  };
+};
+
+export type WindowsBundleOptions = {
+  pfx?: string;
+  pfxPassword?: string;
+};
 
 export type BundleOptions = {
-  identifier?: string
-  category?: string
-  urlSchemes?: string[]
-  usageDescriptions?: UsageDescriptions
-  minimumSystemVersion?: string
+  identifier?: string;
+  category?: string;
+  urlSchemes?: string[];
+  usageDescriptions?: UsageDescriptions;
+  minimumSystemVersion?: string;
   // External executables shipped alongside the binary (ffmpeg, yt-dlp, ...).
   // Each entry is a path relative to the project root. Bundling copies them
   // into the bundle's sidecars dir; the sidecar plugin resolves by basename.
-  sidecars?: string[]
-}
+  sidecars?: string[];
+  macos?: MacOsBundleOptions;
+  windows?: WindowsBundleOptions;
+};
 
 // A capability groups related IPC actions under a single grant. The webview
 // may invoke an action only if at least one matching capability grants it.
@@ -65,28 +101,28 @@ export type BundleOptions = {
 //   actions  — exact action names or `prefix:*` globs
 //   origins  — optional `butter://` origin allowlist (defaults to all)
 export type Capability = {
-  name: string
-  actions: string[]
-  origins?: string[]
-}
+  name: string;
+  actions: string[];
+  origins?: string[];
+};
 
 export type SecurityOptions = {
-  csp?: string
+  csp?: string;
   // Back-compat flat allowlist. Patterns: exact match or `prefix:*`. If both
   // allowlist and capabilities are provided, the union grants access.
-  allowlist?: string[]
-  capabilities?: Capability[]
-}
+  allowlist?: string[];
+  capabilities?: Capability[];
+};
 
 export type MCPOptions = {
-  enabled?: boolean
-  port?: number
-  consoleBuffer?: number
-}
+  enabled?: boolean;
+  port?: number;
+  consoleBuffer?: number;
+};
 
 export type DevOptions = {
-  mcp?: MCPOptions
-}
+  mcp?: MCPOptions;
+};
 
 /**
  * Per-module native compile options. Module key is the source-file basename
@@ -100,55 +136,53 @@ export type DevOptions = {
  * extraFlags: free-form additional compiler flags
  */
 export type NativeModuleOptions = {
-  frameworks?: string[]
-  libs?: string[]
-  includes?: string[]
-  libDirs?: string[]
-  extraFlags?: string[]
-}
+  frameworks?: string[];
+  libs?: string[];
+  includes?: string[];
+  libDirs?: string[];
+  extraFlags?: string[];
+};
 
-export type NativeOptions = Record<string, NativeModuleOptions>
+export type NativeOptions = Record<string, NativeModuleOptions>;
 
 export type Config = {
-  window: WindowOptions
-  build: BuildOptions
-  bundle?: BundleOptions
-  plugins?: string[]
-  security?: SecurityOptions
-  dev?: DevOptions
-  splash?: string
-  native?: NativeOptions
-}
+  window: WindowOptions;
+  build: BuildOptions;
+  bundle?: BundleOptions;
+  plugins?: string[];
+  security?: SecurityOptions;
+  dev?: DevOptions;
+  splash?: string;
+  native?: NativeOptions;
+};
 
-export type MenuItem =
-  | { label: string; action: string; shortcut?: string }
-  | { separator: true }
+export type MenuItem = { label: string; action: string; shortcut?: string } | { separator: true };
 
 export type MenuSection = {
-  label: string
-  items: MenuItem[]
-}
+  label: string;
+  items: MenuItem[];
+};
 
-export type Menu = MenuSection[]
+export type Menu = MenuSection[];
 
 export type HostContext = {
-  on: (action: string, handler: (data: unknown) => unknown) => void
-  send: (action: string, data: unknown) => void
-}
+  on: (action: string, handler: (data: unknown) => unknown) => void;
+  send: (action: string, data: unknown) => void;
+};
 
 export type Plugin = {
-  name: string
-  host: (ctx: HostContext) => void
-  webview: () => string
-}
+  name: string;
+  host: (ctx: HostContext) => void;
+  webview: () => string;
+};
 
 export type IpcMessage = {
-  id: string
-  type: "invoke" | "response" | "event" | "control"
-  action: string
-  data?: unknown
-  error?: string
-}
+  id: string;
+  type: "invoke" | "response" | "event" | "control";
+  action: string;
+  data?: unknown;
+  error?: string;
+};
 
-export { createTypedInvoke } from "./invoke"
-export { createTypedHandlers } from "./handler"
+export { createTypedHandlers } from "./handler";
+export { createTypedInvoke } from "./invoke";

@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { parseConfig, defaultConfig } from "../src/config"
+import { parseConfig, defaultConfig, interpolateEnv } from "../src/config"
 
 test("defaultConfig has sensible defaults", () => {
   const config = defaultConfig()
@@ -93,4 +93,73 @@ build: { entry: "a", host: "b" }
 `
   const c = parseConfig(yaml)
   expect(c.dev).toBeUndefined()
+})
+
+test("interpolateEnv replaces {SHOUTY_VARS} with env values", () => {
+  const result = interpolateEnv(
+    { id: "{MY_ID}", name: "literal", arr: ["{A}", "x"] },
+    { MY_ID: "abc123", A: "alpha" },
+  )
+  expect(result).toEqual({ id: "abc123", name: "literal", arr: ["alpha", "x"] })
+})
+
+test("interpolateEnv leaves JSON-style braces alone", () => {
+  // lowercase, mixed-case, or whitespace inside braces shouldn't match.
+  const result = interpolateEnv(
+    { css: "{ color: red }", code: "{abc}", glob: "{a,b}" },
+    {},
+  )
+  expect(result.css).toBe("{ color: red }")
+  expect(result.code).toBe("{abc}")
+  expect(result.glob).toBe("{a,b}")
+})
+
+test("interpolateEnv resolves missing vars to empty string", () => {
+  const result = interpolateEnv({ x: "{NOT_SET}" }, {})
+  expect(result.x).toBe("")
+})
+
+test("parseConfig interpolates env in bundle.macos block", () => {
+  const yaml = `
+window: { title: "Demo", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+bundle:
+  identifier: io.example.demo
+  macos:
+    signingIdentity: "{APPLE_SIGNING_IDENTITY}"
+    appleId: "{APPLE_ID}"
+    teamId: "{APPLE_TEAM_ID}"
+    appleIdPassword: "{APPLE_APP_PASSWORD}"
+    hardenedRuntime: true
+    notarize: true
+`
+  const c = parseConfig(yaml, {
+    APPLE_SIGNING_IDENTITY: "Developer ID Application: Acme (T1)",
+    APPLE_ID: "dev@acme.com",
+    APPLE_TEAM_ID: "T1",
+    APPLE_APP_PASSWORD: "app-specific-pw",
+  })
+  expect(c.bundle?.macos?.signingIdentity).toBe("Developer ID Application: Acme (T1)")
+  expect(c.bundle?.macos?.appleId).toBe("dev@acme.com")
+  expect(c.bundle?.macos?.teamId).toBe("T1")
+  expect(c.bundle?.macos?.appleIdPassword).toBe("app-specific-pw")
+  expect(c.bundle?.macos?.hardenedRuntime).toBe(true)
+  expect(c.bundle?.macos?.notarize).toBe(true)
+})
+
+test("parseConfig drops empty bundle.macos creds when env vars unset", () => {
+  const yaml = `
+window: { title: "Demo", width: 100, height: 100 }
+build: { entry: "a", host: "b" }
+bundle:
+  macos:
+    signingIdentity: "{APPLE_SIGNING_IDENTITY}"
+    appleId: "{APPLE_ID}"
+    notarize: true
+`
+  const c = parseConfig(yaml, {})
+  expect(c.bundle?.macos?.signingIdentity).toBeUndefined()
+  expect(c.bundle?.macos?.appleId).toBeUndefined()
+  // notarize flag still survives — sign step uses it to decide whether to try.
+  expect(c.bundle?.macos?.notarize).toBe(true)
 })

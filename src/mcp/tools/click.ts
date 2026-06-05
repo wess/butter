@@ -1,9 +1,9 @@
-import { wrapClick } from "../wrap"
+import { wrapClick } from "../wrap";
 
-type Control = (action: string, data: unknown) => Promise<unknown>
+type Control = (action: string, data: unknown) => Promise<unknown>;
 
-export type ClickInput = { selector: string }
-export type ClickOutput = { ok: boolean; error?: string }
+export type ClickInput = { selector: string };
+export type ClickOutput = { ok: boolean; error?: string };
 
 export const clickTool = {
   name: "click",
@@ -18,14 +18,16 @@ export const clickTool = {
     required: ["selector"],
   },
   handler: async (input: ClickInput, control: Control): Promise<ClickOutput> => {
-    const code = wrapClick(input.selector)
-    const raw = (await control("mcp:eval", { code })) as string
+    const code = wrapClick(input.selector);
+    const raw = (await control("mcp:eval", { code })) as string;
     try {
-      const parsed = JSON.parse(raw) as { ok?: boolean; error?: string }
-      if (parsed.error) return { ok: false, error: parsed.error }
-      return { ok: parsed.ok === true }
+      const parsed = JSON.parse(raw) as { ok?: boolean; error?: string };
+      if (parsed.error) {
+        return { ok: false, error: parsed.error };
+      }
+      return { ok: parsed.ok === true };
     } catch {
-      return { ok: false, error: `Could not parse shim response: ${raw}` }
+      return { ok: false, error: `Could not parse shim response: ${raw}` };
     }
   },
-}
+};

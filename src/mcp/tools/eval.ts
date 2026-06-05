@@ -1,9 +1,9 @@
-import { wrapEval } from "../wrap"
+import { wrapEval } from "../wrap";
 
-export type EvalInput = { code: string; await_promise?: boolean }
-export type EvalOutput = { result?: unknown; error?: string }
+export type EvalInput = { code: string; await_promise?: boolean };
+export type EvalOutput = { result?: unknown; error?: string };
 
-type Control = (action: string, data: unknown) => Promise<unknown>
+type Control = (action: string, data: unknown) => Promise<unknown>;
 
 export const evalTool = {
   name: "eval_javascript",
@@ -16,7 +16,8 @@ export const evalTool = {
     properties: {
       code: {
         type: "string",
-        description: "JS source. Bare expressions (e.g., 'document.title') are auto-returned; explicit `return` is also supported.",
+        description:
+          "JS source. Bare expressions (e.g., 'document.title') are auto-returned; explicit `return` is also supported.",
       },
       await_promise: {
         type: "boolean",
@@ -26,12 +27,12 @@ export const evalTool = {
     required: ["code"],
   },
   handler: async (input: EvalInput, control: Control): Promise<EvalOutput> => {
-    const wrapped = wrapEval(input.code, input.await_promise === true)
-    const raw = (await control("mcp:eval", { code: wrapped })) as string
+    const wrapped = wrapEval(input.code, input.await_promise === true);
+    const raw = (await control("mcp:eval", { code: wrapped })) as string;
     try {
-      return JSON.parse(raw) as EvalOutput
+      return JSON.parse(raw) as EvalOutput;
     } catch {
-      return { error: `Could not parse shim response: ${raw}` }
+      return { error: `Could not parse shim response: ${raw}` };
     }
   },
-}
+};

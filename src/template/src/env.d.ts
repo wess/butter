@@ -1,10 +1,14 @@
 declare global {
   const butter: {
-    invoke: (action: string, data?: unknown, opts?: { timeout?: number }) => Promise<unknown>
-    stream: (action: string, data?: unknown, onChunk?: (chunk: unknown) => void) => Promise<unknown>
-    on: (action: string, handler: (data: unknown) => void) => void
-    off: (action: string, handler: (data: unknown) => void) => void
-  }
+    invoke: (action: string, data?: unknown, opts?: { timeout?: number }) => Promise<unknown>;
+    stream: (
+      action: string,
+      data?: unknown,
+      onChunk?: (chunk: unknown) => void,
+    ) => Promise<unknown>;
+    on: (action: string, handler: (data: unknown) => void) => void;
+    off: (action: string, handler: (data: unknown) => void) => void;
+  };
 }
 
-export {}
+export {};

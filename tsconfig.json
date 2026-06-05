@@ -25,5 +25,9 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  // src/template is a standalone app scaffold shipped to users: it imports the
+  // "butter" package (only resolvable once installed) and targets the DOM, so it
+  // cannot be type-checked inside the framework's own program.
+  "exclude": ["node_modules", "src/template", "example", "templates", "tests"]
 }

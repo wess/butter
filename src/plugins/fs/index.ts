@@ -1,120 +1,138 @@
-import type { Plugin, HostContext } from "../../types"
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs"
-import { resolve } from "node:path"
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from "node:fs";
+import { resolve } from "node:path";
+import type { HostContext, Plugin } from "../../types";
 
-type PathParams = { path: string }
-type WriteParams = { path: string; content: string }
+type PathParams = { path: string };
+type WriteParams = { path: string; content: string };
 
 const safePath = (path: string): string => {
-  const resolved = resolve(path)
-  const cwd = process.cwd()
+  const resolved = resolve(path);
+  const cwd = process.cwd();
   if (!resolved.startsWith(cwd)) {
-    throw new Error("Path must be within the project directory")
+    throw new Error("Path must be within the project directory");
   }
-  return resolved
-}
+  return resolved;
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("fs:read", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      const file = Bun.file(safePath(path))
-      const content = await file.text()
-      return { ok: true, content }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      const file = Bun.file(safePath(path));
+      const content = await file.text();
+      return { ok: true, content };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:readbinary", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      const file = Bun.file(safePath(path))
-      const buf = await file.arrayBuffer()
-      const content = Buffer.from(buf).toString("base64")
-      return { ok: true, content }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      const file = Bun.file(safePath(path));
+      const buf = await file.arrayBuffer();
+      const content = Buffer.from(buf).toString("base64");
+      return { ok: true, content };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:write", async (data: unknown) => {
-    const { path, content } = data as WriteParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      await Bun.write(safePath(path), content ?? "")
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path, content } = data as WriteParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      await Bun.write(safePath(path), content ?? "");
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:writebinary", async (data: unknown) => {
-    const { path, content } = data as WriteParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      const buf = Buffer.from(content, "base64")
-      await Bun.write(safePath(path), buf)
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path, content } = data as WriteParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      const buf = Buffer.from(content, "base64");
+      await Bun.write(safePath(path), buf);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:exists", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      return { ok: true, exists: existsSync(safePath(path)) }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      return { ok: true, exists: existsSync(safePath(path)) };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:mkdir", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      mkdirSync(safePath(path), { recursive: true })
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      mkdirSync(safePath(path), { recursive: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:readdir", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
+    }
     try {
       const entries = readdirSync(safePath(path), { withFileTypes: true }).map((e) => ({
         name: e.name,
         isDirectory: e.isDirectory(),
         isFile: e.isFile(),
-      }))
-      return { ok: true, entries }
+      }));
+      return { ok: true, entries };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("fs:remove", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
-    try {
-      rmSync(safePath(path), { recursive: true, force: true })
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
     }
-  })
+    try {
+      rmSync(safePath(path), { recursive: true, force: true });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("fs:stat", async (data: unknown) => {
-    const { path } = data as PathParams
-    if (!path) return { ok: false, error: "path is required" }
+    const { path } = data as PathParams;
+    if (!path) {
+      return { ok: false, error: "path is required" };
+    }
     try {
-      const s = statSync(safePath(path))
+      const s = statSync(safePath(path));
       return {
         ok: true,
         stat: {
@@ -124,12 +142,12 @@ const host = (ctx: HostContext): void => {
           isDirectory: s.isDirectory(),
           isFile: s.isFile(),
         },
-      }
+      };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
-}
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -164,12 +182,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const fs: Plugin = {
   name: "fs",
   host,
   webview,
-}
+};
 
-export default fs
+export default fs;

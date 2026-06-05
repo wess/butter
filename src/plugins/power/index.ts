@@ -1,4 +1,4 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 // Power, screen, and idle events. Shim emits:
 //   power:sleep / power:wake               — system suspend/resume
@@ -14,27 +14,31 @@ import type { Plugin, HostContext } from "../../types"
 
 const host = (ctx: HostContext): void => {
   ctx.on("power:idle", async () => {
-    const runtime = globalThis.__butterRuntime
-    if (!runtime) return { ok: false, error: "runtime not initialized" }
-    try {
-      const result = await runtime.control("power:idle")
-      return result ?? { ok: false }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const runtime = globalThis.__butterRuntime;
+    if (!runtime) {
+      return { ok: false, error: "runtime not initialized" };
     }
-  })
+    try {
+      const result = await runtime.control("power:idle");
+      return result ?? { ok: false };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
 
   ctx.on("screen:list", async () => {
-    const runtime = globalThis.__butterRuntime
-    if (!runtime) return { ok: false, error: "runtime not initialized" }
-    try {
-      const result = await runtime.control("screen:list")
-      return result ?? { ok: false }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const runtime = globalThis.__butterRuntime;
+    if (!runtime) {
+      return { ok: false, error: "runtime not initialized" };
     }
-  })
-}
+    try {
+      const result = await runtime.control("screen:list");
+      return result ?? { ok: false };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -73,12 +77,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const power: Plugin = {
   name: "power",
   host,
   webview,
-}
+};
 
-export default power
+export default power;

@@ -1,6 +1,6 @@
-import type { Plugin, HostContext } from "../../types"
-import { existsSync } from "fs"
-import { join, basename, isAbsolute } from "path"
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import type { HostContext, Plugin } from "../../types";
 
 // Sidecar binaries — external executables shipped alongside the app
 // (ffmpeg, yt-dlp, a Go daemon, etc.). Declared in butter.yaml under
@@ -8,121 +8,145 @@ import { join, basename, isAbsolute } from "path"
 // relative to the project root; in a compiled binary the bundle copies
 // them to <bundle>/sidecars/ and BUTTER_SIDECARS_DIR points at it.
 
-type SpawnParams = { name: string; args?: string[]; cwd?: string; env?: Record<string, string> }
+type SpawnParams = { name: string; args?: string[]; cwd?: string; env?: Record<string, string> };
 
 type Running = {
-  proc: ReturnType<typeof Bun.spawn>
-  name: string
-}
+  proc: ReturnType<typeof Bun.spawn>;
+  name: string;
+};
 
-const processes = new Map<string, Running>()
-let nextId = 1
-const encoder = new TextEncoder()
+const processes = new Map<string, Running>();
+let nextId = 1;
+const encoder = new TextEncoder();
 
 const sidecarPaths = (): Map<string, string> => {
-  const map = new Map<string, string>()
-  const raw = process.env.BUTTER_SIDECARS ?? ""
-  if (!raw) return map
-  for (const entry of raw.split(":::")) {
-    if (!entry) continue
-    const [name, path] = entry.split("==", 2)
-    if (name && path) map.set(name, path)
+  const map = new Map<string, string>();
+  const raw = process.env.BUTTER_SIDECARS ?? "";
+  if (!raw) {
+    return map;
   }
-  return map
-}
+  for (const entry of raw.split(":::")) {
+    if (!entry) {
+      continue;
+    }
+    const [name, path] = entry.split("==", 2);
+    if (name && path) {
+      map.set(name, path);
+    }
+  }
+  return map;
+};
 
 const resolveSidecar = (name: string): string | null => {
-  const paths = sidecarPaths()
-  const direct = paths.get(name)
-  if (direct && existsSync(direct)) return direct
-  // Fallback: per-platform bundled dir
-  const dir = process.env.BUTTER_SIDECARS_DIR
-  if (dir) {
-    const ext = process.platform === "win32" ? ".exe" : ""
-    const candidate = join(dir, `${name}${ext}`)
-    if (existsSync(candidate)) return candidate
+  const paths = sidecarPaths();
+  const direct = paths.get(name);
+  if (direct && existsSync(direct)) {
+    return direct;
   }
-  return null
-}
+  // Fallback: per-platform bundled dir
+  const dir = process.env.BUTTER_SIDECARS_DIR;
+  if (dir) {
+    const ext = process.platform === "win32" ? ".exe" : "";
+    const candidate = join(dir, `${name}${ext}`);
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return null;
+};
 
 const streamReader = async (
   stream: ReadableStream<Uint8Array> | null | undefined,
   emit: (text: string) => void,
 ): Promise<void> => {
-  if (!stream) return
-  const reader = stream.getReader()
-  const decoder = new TextDecoder()
-  for (;;) {
-    const { value, done } = await reader.read()
-    if (done) break
-    if (value) emit(decoder.decode(value, { stream: true }))
+  if (!stream) {
+    return;
   }
-}
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) {
+      break;
+    }
+    if (value) {
+      emit(decoder.decode(value, { stream: true }));
+    }
+  }
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("sidecar:list", () => {
-    const map = sidecarPaths()
-    return { ok: true, names: [...map.keys()] }
-  })
+    const map = sidecarPaths();
+    return { ok: true, names: [...map.keys()] };
+  });
 
   ctx.on("sidecar:spawn", (data: unknown) => {
-    const { name, args, cwd, env } = data as SpawnParams
-    if (!name) return { ok: false, error: "name required" }
-    const path = resolveSidecar(name)
-    if (!path) return { ok: false, error: `sidecar not found: ${name}` }
-    const id = `sc_${nextId++}`
+    const { name, args, cwd, env } = data as SpawnParams;
+    if (!name) {
+      return { ok: false, error: "name required" };
+    }
+    const path = resolveSidecar(name);
+    if (!path) {
+      return { ok: false, error: `sidecar not found: ${name}` };
+    }
+    const id = `sc_${nextId++}`;
     const proc = Bun.spawn([path, ...(args ?? [])], {
       cwd,
       env: { ...process.env, ...(env ?? {}) },
       stdin: "pipe",
       stdout: "pipe",
       stderr: "pipe",
-    })
-    processes.set(id, { proc, name })
+    });
+    processes.set(id, { proc, name });
 
     streamReader(proc.stdout as ReadableStream<Uint8Array>, (text) =>
       ctx.send("sidecar:stdout", { id, name, data: text }),
-    ).catch(() => {})
+    ).catch(() => {});
     streamReader(proc.stderr as ReadableStream<Uint8Array>, (text) =>
       ctx.send("sidecar:stderr", { id, name, data: text }),
-    ).catch(() => {})
+    ).catch(() => {});
 
     proc.exited.then((code) => {
-      processes.delete(id)
-      ctx.send("sidecar:exit", { id, name, code })
-    })
+      processes.delete(id);
+      ctx.send("sidecar:exit", { id, name, code });
+    });
 
-    return { ok: true, id }
-  })
+    return { ok: true, id };
+  });
 
   ctx.on("sidecar:write", async (data: unknown) => {
-    const { id, text } = data as { id: string; text: string }
-    const r = processes.get(id)
-    if (!r) return { ok: false, error: "unknown sidecar id" }
-    const stdin = r.proc.stdin
+    const { id, text } = data as { id: string; text: string };
+    const r = processes.get(id);
+    if (!r) {
+      return { ok: false, error: "unknown sidecar id" };
+    }
+    const stdin = r.proc.stdin;
     if (!stdin || typeof (stdin as { write?: unknown }).write !== "function") {
-      return { ok: false, error: "stdin not writable" }
+      return { ok: false, error: "stdin not writable" };
     }
     try {
-      ;(stdin as { write: (chunk: Uint8Array) => unknown }).write(encoder.encode(text))
-      return { ok: true }
+      (stdin as { write: (chunk: Uint8Array) => unknown }).write(encoder.encode(text));
+      return { ok: true };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("sidecar:kill", (data: unknown) => {
-    const { id, signal } = data as { id: string; signal?: NodeJS.Signals | number }
-    const r = processes.get(id)
-    if (!r) return { ok: false, error: "unknown sidecar id" }
-    try {
-      r.proc.kill(signal ?? "SIGTERM")
-      return { ok: true }
-    } catch (err) {
-      return { ok: false, error: String(err) }
+    const { id, signal } = data as { id: string; signal?: NodeJS.Signals | number };
+    const r = processes.get(id);
+    if (!r) {
+      return { ok: false, error: "unknown sidecar id" };
     }
-  })
-}
+    try {
+      r.proc.kill(signal ?? "SIGTERM");
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: String(err) };
+    }
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -157,12 +181,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const sidecar: Plugin = {
   name: "sidecar",
   host,
   webview,
-}
+};
 
-export default sidecar
+export default sidecar;

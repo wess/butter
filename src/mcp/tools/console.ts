@@ -1,6 +1,6 @@
-import type { ConsoleBuffer, ConsoleReadResult } from "../console"
+import type { ConsoleBuffer, ConsoleReadResult } from "../console";
 
-export type ConsoleInput = { since_cursor?: number }
+export type ConsoleInput = { since_cursor?: number };
 
 export const consoleTool = {
   name: "list_console_messages",
@@ -17,6 +17,6 @@ export const consoleTool = {
     },
   },
   handler: async (input: ConsoleInput, buf: ConsoleBuffer): Promise<ConsoleReadResult> => {
-    return buf.read(input.since_cursor)
+    return buf.read(input.since_cursor);
   },
-}
+};

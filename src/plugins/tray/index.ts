@@ -1,33 +1,31 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
-type TrayItem =
-  | { label: string; action: string }
-  | { separator: true }
+type TrayItem = { label: string; action: string } | { separator: true };
 
 type TrayOptions = {
-  title?: string
-  tooltip?: string
-  items?: TrayItem[]
-}
+  title?: string;
+  tooltip?: string;
+  items?: TrayItem[];
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("tray:set", (data: unknown) => {
-    const opts = data as TrayOptions
-    const runtime = globalThis.__butterRuntime
+    const opts = data as TrayOptions;
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("tray:set", opts)
+      runtime.tell("tray:set", opts);
     }
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("tray:remove", () => {
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("tray:remove")
+      runtime.tell("tray:remove");
     }
-    return { ok: true }
-  })
-}
+    return { ok: true };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -41,12 +39,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const tray: Plugin = {
   name: "tray",
   host,
   webview,
-}
+};
 
-export default tray
+export default tray;

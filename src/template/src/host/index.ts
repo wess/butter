@@ -1,5 +1,5 @@
-import { on, send } from "butter"
+import { on } from "butter";
 
 on("greet", (name) => {
-  return `Hello, ${name}!`
-})
+  return `Hello, ${name}!`;
+});

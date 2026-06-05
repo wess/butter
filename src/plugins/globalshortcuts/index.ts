@@ -1,61 +1,61 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 type ShortcutDefinition = {
-  key: string
-  modifiers?: Array<"cmd" | "ctrl" | "alt" | "shift">
-}
+  key: string;
+  modifiers?: Array<"cmd" | "ctrl" | "alt" | "shift">;
+};
 
 type RegisterOptions = {
-  shortcut: ShortcutDefinition
-  id: string
-}
+  shortcut: ShortcutDefinition;
+  id: string;
+};
 
-const registry = new Map<string, RegisterOptions>()
+const registry = new Map<string, RegisterOptions>();
 
 const host = (ctx: HostContext): void => {
   ctx.on("shortcut:register", (data: unknown) => {
-    const opts = data as RegisterOptions
+    const opts = data as RegisterOptions;
 
     if (!opts?.id || !opts?.shortcut?.key) {
-      return { ok: false, error: "id and shortcut.key are required" }
+      return { ok: false, error: "id and shortcut.key are required" };
     }
 
-    registry.set(opts.id, opts)
+    registry.set(opts.id, opts);
 
     // Notify the shim for native registration. Fire-and-forget — the shim
     // doesn't ack; success is reported asynchronously via shortcut:triggered.
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("shortcut:register", opts)
+      runtime.tell("shortcut:register", opts);
     }
 
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   ctx.on("shortcut:unregister", (data: unknown) => {
-    const id = typeof data === "string" ? data : (data as { id: string })?.id
+    const id = typeof data === "string" ? data : (data as { id: string })?.id;
 
     if (!id) {
-      return { ok: false, error: "id is required" }
+      return { ok: false, error: "id is required" };
     }
 
-    registry.delete(id)
+    registry.delete(id);
 
-    const runtime = globalThis.__butterRuntime
+    const runtime = globalThis.__butterRuntime;
     if (runtime) {
-      runtime.tell("shortcut:unregister", { id })
+      runtime.tell("shortcut:unregister", { id });
     }
 
-    return { ok: true }
-  })
+    return { ok: true };
+  });
 
   // Handle shortcut:triggered events from shim
   ctx.on("shortcut:triggered", (data: unknown) => {
-    const { id } = data as { id: string }
+    const { id } = data as { id: string };
     // Re-emit so host handlers can listen
-    ctx.send("shortcut:triggered", { id })
-  })
-}
+    ctx.send("shortcut:triggered", { id });
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -69,12 +69,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const globalshortcuts: Plugin = {
   name: "globalshortcuts",
   host,
   webview,
-}
+};
 
-export default globalshortcuts
+export default globalshortcuts;

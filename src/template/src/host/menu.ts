@@ -1,11 +1,9 @@
-import type { Menu } from "butter"
+import type { Menu } from "butter";
 
 const menu: Menu = [
   {
     label: "File",
-    items: [
-      { label: "Quit", action: "quit", shortcut: "CmdOrCtrl+Q" },
-    ],
+    items: [{ label: "Quit", action: "quit", shortcut: "CmdOrCtrl+Q" }],
   },
   {
     label: "Edit",
@@ -18,6 +16,6 @@ const menu: Menu = [
       { label: "Paste", action: "paste", shortcut: "CmdOrCtrl+V" },
     ],
   },
-]
+];
 
-export default menu
+export default menu;

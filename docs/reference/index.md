@@ -13,6 +13,14 @@ Butter is a minimal desktop application framework for macOS and Linux. It pairs 
 | [native.md](./native.md) | Native extensions (C, Moxy, Rust, Zig), exports, type mapping, compilation |
 | [architecture.md](./architecture.md) | Process model, shared memory layout, ring buffer protocol, bridge injection |
 
+## Design Notes
+
+Exploratory documents that capture decisions still under discussion. They are not part of the supported API.
+
+| Document | Contents |
+|---|---|
+| [../concepts/embedded-chrome.md](../concepts/embedded-chrome.md) | Exploration of shipping an embedded rendering engine vs. the system webviews used today |
+
 ## Concepts
 
 **Host process** — A Bun process that runs your `src/host/index.ts`. It owns the application lifecycle, registers IPC handlers via `on()`, and pushes events to the webview via `send()`.

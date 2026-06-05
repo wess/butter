@@ -456,8 +456,21 @@ static id g_globalMonitor = nil;
     const char *utf8 = [body UTF8String];
     if (!utf8) return;
 
+    /*
+     * Dispatch on parsed top-level fields, never on a raw substring search:
+     * a webview `invoke` carries arbitrary user data that can legitimately
+     * contain any of these reserved action names.
+     */
+    NSData *bodyData = [body dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *parsedBody = bodyData
+        ? [NSJSONSerialization JSONObjectWithData:bodyData options:0 error:nil]
+        : nil;
+    if (![parsedBody isKindOfClass:[NSDictionary class]]) parsedBody = nil;
+    NSString *bodyType = [parsedBody[@"__type"] isKindOfClass:[NSString class]] ? parsedBody[@"__type"] : nil;
+    NSString *bodyAction = [parsedBody[@"action"] isKindOfClass:[NSString class]] ? parsedBody[@"action"] : nil;
+
     /* Console capture from injected wrapper */
-    if (strstr(utf8, "\"__type\":\"console\"")) {
+    if ([bodyType isEqualToString:@"console"]) {
         NSData *jdata = [body dataUsingEncoding:NSUTF8StringEncoding];
         NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil];
         NSString *level = parsed[@"level"] ?: @"log";
@@ -476,18 +489,20 @@ static id g_globalMonitor = nil;
     }
 
     /* Check for context menu request */
-    if (strstr(utf8, "\"__contextmenu\"")) {
+    if ([bodyAction isEqualToString:@"__contextmenu"]) {
         [self showContextMenuFromJson:body];
         return;
     }
 
     /* Intercept dialog requests from webview — handle natively without host round-trip */
-    if (strstr(utf8, "\"dialog:open\"") || strstr(utf8, "\"dialog:save\"") || strstr(utf8, "\"dialog:folder\"")) {
+    if ([bodyAction isEqualToString:@"dialog:open"] ||
+        [bodyAction isEqualToString:@"dialog:save"] ||
+        [bodyAction isEqualToString:@"dialog:folder"]) {
         [self handleWebviewDialog:body];
         return;
     }
 
-    if (strstr(utf8, "\"dialog:message\"")) {
+    if ([bodyAction isEqualToString:@"dialog:message"]) {
         [self handleMessageDialog:body fromWebview:YES];
         return;
     }
@@ -1416,28 +1431,43 @@ static unsigned short keyCodeForString(NSString *key) {
     char *msg;
     while ((msg = ring_read_ts()) != NULL) {
         NSString *json = [NSString stringWithUTF8String:msg];
-        if (strstr(msg, "\"type\":\"control\"")) {
-            if (strstr(msg, "\"quit\"")) {
+        /*
+         * Dispatch on the parsed top-level `action` field, never on a raw
+         * substring search. Control payloads — `menu:set` especially —
+         * embed their own `"action":"..."` pairs for menu items, so a
+         * substring match would misfire: a menu item with action "quit"
+         * would terminate the app the instant the menu was applied.
+         */
+        NSDictionary *ctrlMsg = nil;
+        if (json) {
+            NSData *ctrlData = [json dataUsingEncoding:NSUTF8StringEncoding];
+            ctrlMsg = ctrlData ? [NSJSONSerialization JSONObjectWithData:ctrlData options:0 error:nil] : nil;
+            if (![ctrlMsg isKindOfClass:[NSDictionary class]]) ctrlMsg = nil;
+        }
+        NSString *ctrlType = [ctrlMsg[@"type"] isKindOfClass:[NSString class]] ? ctrlMsg[@"type"] : nil;
+        NSString *ctrlAction = [ctrlMsg[@"action"] isKindOfClass:[NSString class]] ? ctrlMsg[@"action"] : nil;
+        if ([ctrlType isEqualToString:@"control"]) {
+            if ([ctrlAction isEqualToString:@"quit"]) {
                 free(msg);
                 [NSApp terminate:nil];
                 return;
             }
-            if (strstr(msg, "\"reload\"")) {
+            if ([ctrlAction isEqualToString:@"reload"]) {
                 free(msg);
                 if (self.webview) [self.webview reload];
                 continue;
             }
-            if (strstr(msg, "\"dialog:open\"") || strstr(msg, "\"dialog:save\"") || strstr(msg, "\"dialog:folder\"")) {
+            if ([ctrlAction isEqualToString:@"dialog:open"] || [ctrlAction isEqualToString:@"dialog:save"] || [ctrlAction isEqualToString:@"dialog:folder"]) {
                 [self handleDialogControl:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"dialog:message\"")) {
+            if ([ctrlAction isEqualToString:@"dialog:message"]) {
                 [self handleMessageDialog:json fromWebview:NO];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"screen:list\"")) {
+            if ([ctrlAction isEqualToString:@"screen:list"]) {
                 NSMutableArray *screens = [NSMutableArray array];
                 for (NSScreen *screen in [NSScreen screens]) {
                     NSRect frame = [screen frame];
@@ -1469,7 +1499,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:ready\"")) {
+            if ([ctrlAction isEqualToString:@"window:ready"]) {
                 /* Swap from splash to main app */
                 if (self.webview) {
                     NSURL *appURL = [NSURL URLWithString:@"butter://app/index.html"];
@@ -1478,7 +1508,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:screenshot\"")) {
+            if ([ctrlAction isEqualToString:@"window:screenshot"]) {
                 NSString *msgId = @"0";
                 NSData *data2 = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data2 options:0 error:nil];
@@ -1511,7 +1541,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"power:idle\"")) {
+            if ([ctrlAction isEqualToString:@"power:idle"]) {
                 NSString *msgId = @"0";
                 NSData *jd = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
@@ -1527,7 +1557,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"screen:list\"")) {
+            if ([ctrlAction isEqualToString:@"screen:list"]) {
                 NSString *msgId = @"0";
                 NSData *jd = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jd options:0 error:nil];
@@ -1552,7 +1582,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"mcp:eval\"")) {
+            if ([ctrlAction isEqualToString:@"mcp:eval"]) {
                 NSString *msgId = @"0";
                 NSData *jdata = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil];
@@ -1598,7 +1628,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:print\"")) {
+            if ([ctrlAction isEqualToString:@"window:print"]) {
                 if (self.webview) {
                     NSPrintInfo *printInfo = [NSPrintInfo sharedPrintInfo];
                     NSPrintOperation *op = [self.webview printOperationWithPrintInfo:printInfo];
@@ -1609,27 +1639,27 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"tray:set\"")) {
+            if ([ctrlAction isEqualToString:@"tray:set"]) {
                 [self handleTraySet:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"tray:remove\"")) {
+            if ([ctrlAction isEqualToString:@"tray:remove"]) {
                 [self handleTrayRemove];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"shortcut:register\"")) {
+            if ([ctrlAction isEqualToString:@"shortcut:register"]) {
                 [self handleShortcutRegister:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"shortcut:unregister\"")) {
+            if ([ctrlAction isEqualToString:@"shortcut:unregister"]) {
                 [self handleShortcutUnregister:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"menu:set\"")) {
+            if ([ctrlAction isEqualToString:@"menu:set"]) {
                 /* Rebuild the menu bar from new JSON */
                 NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
@@ -1643,68 +1673,68 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:create\"")) {
+            if ([ctrlAction isEqualToString:@"window:create"]) {
                 [self handleWindowCreate:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:set\"")) {
+            if ([ctrlAction isEqualToString:@"window:set"]) {
                 [self handleWindowSet:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:maximize\"")) {
+            if ([ctrlAction isEqualToString:@"window:maximize"]) {
                 [self.window zoom:nil];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:minimize\"")) {
+            if ([ctrlAction isEqualToString:@"window:minimize"]) {
                 [self.window miniaturize:nil];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:restore\"")) {
+            if ([ctrlAction isEqualToString:@"window:restore"]) {
                 [self.window deminiaturize:nil];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:fullscreen\"")) {
+            if ([ctrlAction isEqualToString:@"window:fullscreen"]) {
                 [self handleWindowFullscreen:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:alwaysontop\"")) {
+            if ([ctrlAction isEqualToString:@"window:alwaysontop"]) {
                 [self handleWindowAlwaysOnTop:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"window:close\"")) {
+            if ([ctrlAction isEqualToString:@"window:close"]) {
                 [self handleWindowClose:json];
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"nav:back\"")) {
+            if ([ctrlAction isEqualToString:@"nav:back"]) {
                 if (self.webview && [self.webview canGoBack]) {
                     [self.webview goBack];
                 }
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"nav:forward\"")) {
+            if ([ctrlAction isEqualToString:@"nav:forward"]) {
                 if (self.webview && [self.webview canGoForward]) {
                     [self.webview goForward];
                 }
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"nav:reload\"")) {
+            if ([ctrlAction isEqualToString:@"nav:reload"]) {
                 if (self.webview) {
                     [self.webview reload];
                 }
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"nav:loadurl\"")) {
+            if ([ctrlAction isEqualToString:@"nav:loadurl"]) {
                 NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 NSDictionary *navData = parsed[@"data"];
@@ -1718,7 +1748,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"dock:setbadge\"")) {
+            if ([ctrlAction isEqualToString:@"dock:setbadge"]) {
                 NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 NSDictionary *dockData = parsed[@"data"];
@@ -1727,7 +1757,7 @@ static unsigned short keyCodeForString(NSString *key) {
                 free(msg);
                 continue;
             }
-            if (strstr(msg, "\"dock:bounce\"")) {
+            if ([ctrlAction isEqualToString:@"dock:bounce"]) {
                 NSData *data = [json dataUsingEncoding:NSUTF8StringEncoding];
                 NSDictionary *parsed = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
                 NSDictionary *dockData = parsed[@"data"];

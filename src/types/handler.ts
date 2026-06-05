@@ -1,5 +1,5 @@
-import type { InvokeMap } from "./index"
-import { on } from "../runtime"
+import { on } from "../runtime";
+import type { InvokeMap } from "./index";
 
 // Type-safe handler registration
 export const createTypedHandlers = <T extends InvokeMap>() => {
@@ -8,7 +8,7 @@ export const createTypedHandlers = <T extends InvokeMap>() => {
       action: K,
       handler: (data: T[K]["input"]) => T[K]["output"] | Promise<T[K]["output"]>,
     ) => {
-      on(action as string, handler as any)
+      on(action as string, handler as any);
     },
-  }
-}
+  };
+};

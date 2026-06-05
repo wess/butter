@@ -1,28 +1,34 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 const host = (ctx: HostContext): void => {
   // Announce sends a message to the webview's ARIA live region
   ctx.on("a11y:announce", (data: unknown) => {
-    const opts = data as { message: string; priority?: "polite" | "assertive" }
-    if (!opts?.message) return { ok: false, error: "message required" }
-    ctx.send("a11y:announce", opts)
-    return { ok: true }
-  })
+    const opts = data as { message: string; priority?: "polite" | "assertive" };
+    if (!opts?.message) {
+      return { ok: false, error: "message required" };
+    }
+    ctx.send("a11y:announce", opts);
+    return { ok: true };
+  });
 
   // Set the document title (used by screen readers)
   ctx.on("a11y:title", (data: unknown) => {
-    const title = typeof data === "string" ? data : (data as { title: string })?.title
-    if (title) ctx.send("a11y:title", { title })
-    return { ok: true }
-  })
+    const title = typeof data === "string" ? data : (data as { title: string })?.title;
+    if (title) {
+      ctx.send("a11y:title", { title });
+    }
+    return { ok: true };
+  });
 
   // Focus a specific element by selector
   ctx.on("a11y:focus", (data: unknown) => {
-    const selector = typeof data === "string" ? data : (data as { selector: string })?.selector
-    if (selector) ctx.send("a11y:focus", { selector })
-    return { ok: true }
-  })
-}
+    const selector = typeof data === "string" ? data : (data as { selector: string })?.selector;
+    if (selector) {
+      ctx.send("a11y:focus", { selector });
+    }
+    return { ok: true };
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -76,12 +82,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const accessibility: Plugin = {
   name: "accessibility",
   host,
   webview,
-}
+};
 
-export default accessibility
+export default accessibility;

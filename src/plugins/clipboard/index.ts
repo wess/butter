@@ -1,49 +1,49 @@
-import type { Plugin, HostContext } from "../../types"
+import type { HostContext, Plugin } from "../../types";
 
 const readClipboard = async (): Promise<string> => {
-  const platform = process.platform
+  const platform = process.platform;
   if (platform === "darwin") {
-    return await Bun.$`pbpaste`.text()
+    return await Bun.$`pbpaste`.text();
   } else if (platform === "linux") {
-    return await Bun.$`xclip -selection clipboard -o`.text()
+    return await Bun.$`xclip -selection clipboard -o`.text();
   } else if (platform === "win32") {
-    return await Bun.$`powershell -Command Get-Clipboard`.text()
+    return await Bun.$`powershell -Command Get-Clipboard`.text();
   }
-  return ""
-}
+  return "";
+};
 
 const writeClipboard = async (text: string): Promise<void> => {
-  const platform = process.platform
+  const platform = process.platform;
   if (platform === "darwin") {
-    await Bun.$`echo ${text}`.pipe(Bun.$`pbcopy`)
+    await Bun.$`pbcopy < ${new Response(text)}`;
   } else if (platform === "linux") {
-    await Bun.$`echo ${text}`.pipe(Bun.$`xclip -selection clipboard`)
+    await Bun.$`xclip -selection clipboard < ${new Response(text)}`;
   } else if (platform === "win32") {
-    await Bun.$`powershell -Command Set-Clipboard -Value ${text}`
+    await Bun.$`powershell -Command Set-Clipboard -Value ${text}`;
   }
-}
+};
 
 const host = (ctx: HostContext): void => {
   ctx.on("clipboard:read", async (_data: unknown) => {
     try {
-      const text = await readClipboard()
-      return { ok: true, text }
+      const text = await readClipboard();
+      return { ok: true, text };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
+  });
 
   ctx.on("clipboard:write", async (data: unknown) => {
-    const text = typeof data === "string" ? data : (data as { text: string })?.text ?? ""
+    const text = typeof data === "string" ? data : ((data as { text: string })?.text ?? "");
 
     try {
-      await writeClipboard(text)
-      return { ok: true }
+      await writeClipboard(text);
+      return { ok: true };
     } catch (err) {
-      return { ok: false, error: String(err) }
+      return { ok: false, error: String(err) };
     }
-  })
-}
+  });
+};
 
 const webview = (): string => `
 (function () {
@@ -57,12 +57,12 @@ const webview = (): string => `
     }
   };
 })();
-`
+`;
 
 const clipboard: Plugin = {
   name: "clipboard",
   host,
   webview,
-}
+};
 
-export default clipboard
+export default clipboard;

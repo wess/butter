@@ -1,97 +1,91 @@
-import { join } from "path"
-import { watch } from "fs"
-import { loadConfig } from "../config"
-import { createRuntime } from "../runtime"
-import { compileShim, shimSourcePath, shimBinaryPath, needsRecompile, spawnShim } from "../shim"
-import { createSharedRegion, destroySharedRegion, signalToShim } from "../ipc/shmem"
-import { loadMenu } from "../menu"
-import { serializeMenu } from "../menu"
-import { runDoctor, printDoctorResults } from "./doctor"
-import { buildNativeExtensions } from "../native/build"
-import { createMcpServer } from "../mcp"
-import { loadHostPlugins, writeWebviewBundle } from "./plugins"
-import type { IpcMessage } from "../types"
+import { watch } from "node:fs";
+import { join } from "node:path";
+import { loadConfig } from "../config";
+import { createSharedRegion, destroySharedRegion, signalToShim } from "../ipc/shmem";
+import { createMcpServer } from "../mcp";
+import { loadMenu, serializeMenu } from "../menu";
+import { buildNativeExtensions } from "../native/build";
+import { createRuntime } from "../runtime";
+import { compileShim, needsRecompile, shimBinaryPath, shimSourcePath, spawnShim } from "../shim";
+import type { IpcMessage } from "../types";
+import { printDoctorResults, runDoctor } from "./doctor";
+import { loadHostPlugins, writeWebviewBundle } from "./plugins";
 
-const SHM_SIZE = 128 * 1024
-const HEADER_SIZE = 64
-const RING_SIZE = (SHM_SIZE - HEADER_SIZE) / 2
-const TO_BUN_OFFSET = HEADER_SIZE
-const TO_SHIM_OFFSET = HEADER_SIZE + RING_SIZE
-const POLL_MS = Math.floor(1000 / 60)
+const SHM_SIZE = 128 * 1024;
+const HEADER_SIZE = 64;
+const RING_SIZE = (SHM_SIZE - HEADER_SIZE) / 2;
+const TO_BUN_OFFSET = HEADER_SIZE;
+const TO_SHIM_OFFSET = HEADER_SIZE + RING_SIZE;
+const POLL_MS = Math.floor(1000 / 60);
 
 // Frame format: [len:u32 LE][flags:u32 LE][payload:bytes]. A logical message
 // may span multiple frames; only the final frame has FLAG_LAST set. This
 // lets payloads larger than RING_SIZE stream through across multiple
 // reader drains (the previous single-frame format truncated silently).
-const FRAME_HEADER_SIZE = 8
-const FLAG_LAST = 1
-const MAX_CHUNK_PAYLOAD = 16 * 1024
+const FRAME_HEADER_SIZE = 8;
+const FLAG_LAST = 1;
+const MAX_CHUNK_PAYLOAD = 16 * 1024;
 
 const readU32 = (buf: Uint8Array, offset: number): number => {
-  const view = new DataView(buf.buffer, buf.byteOffset + offset)
-  return view.getUint32(0, true)
-}
+  const view = new DataView(buf.buffer, buf.byteOffset + offset);
+  return view.getUint32(0, true);
+};
 
 const writeU32 = (buf: Uint8Array, offset: number, value: number): void => {
-  const view = new DataView(buf.buffer, buf.byteOffset + offset)
-  view.setUint32(0, value, true)
-}
+  const view = new DataView(buf.buffer, buf.byteOffset + offset);
+  view.setUint32(0, value, true);
+};
 
-const ringAvailable = (w: number, r: number): number =>
-  w >= r ? w - r : RING_SIZE - r + w
+const ringAvailable = (w: number, r: number): number => (w >= r ? w - r : RING_SIZE - r + w);
 
-const ringFree = (w: number, r: number): number =>
-  r > w ? r - w - 1 : RING_SIZE - (w - r) - 1
+const ringFree = (w: number, r: number): number => (r > w ? r - w - 1 : RING_SIZE - (w - r) - 1);
 
 type IpcState = {
-  buf: Uint8Array
+  buf: Uint8Array;
   // Outgoing frames waiting to drain into the to-shim ring (FIFO).
-  pendingWrite: { bytes: Uint8Array; offset: number }[]
+  pendingWrite: { bytes: Uint8Array; offset: number }[];
   // Reassembly state for incoming chunks from the to-bun ring.
-  reassembly: Uint8Array[]
-  reassemblyLen: number
-}
+  reassembly: Uint8Array[];
+  reassemblyLen: number;
+};
 
 const createIpcState = (buf: Uint8Array): IpcState => ({
   buf,
   pendingWrite: [],
   reassembly: [],
   reassemblyLen: 0,
-})
+});
 
 // Reused across all IPC encode/decode calls — TextEncoder/TextDecoder
 // allocations show up surprisingly high in profiles for high-frequency IPC.
-const encoder = new TextEncoder()
-const decoder = new TextDecoder()
+const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 const buildFrame = (payload: Uint8Array, flags: number): Uint8Array => {
-  const frame = new Uint8Array(FRAME_HEADER_SIZE + payload.length)
-  const view = new DataView(frame.buffer)
-  view.setUint32(0, payload.length, true)
-  view.setUint32(4, flags, true)
-  frame.set(payload, FRAME_HEADER_SIZE)
-  return frame
-}
+  const frame = new Uint8Array(FRAME_HEADER_SIZE + payload.length);
+  const view = new DataView(frame.buffer);
+  view.setUint32(0, payload.length, true);
+  view.setUint32(4, flags, true);
+  frame.set(payload, FRAME_HEADER_SIZE);
+  return frame;
+};
 
 const enqueueOutgoing = (state: IpcState, msg: IpcMessage): void => {
-  const json = JSON.stringify(msg)
-  const payload = encoder.encode(json)
+  const json = JSON.stringify(msg);
+  const payload = encoder.encode(json);
   if (payload.length === 0) {
-    state.pendingWrite.push({ bytes: buildFrame(payload, FLAG_LAST), offset: 0 })
-    return
+    state.pendingWrite.push({ bytes: buildFrame(payload, FLAG_LAST), offset: 0 });
+    return;
   }
-  let offset = 0
+  let offset = 0;
   while (offset < payload.length) {
-    const chunkLen = Math.min(payload.length - offset, MAX_CHUNK_PAYLOAD)
-    const isLast = offset + chunkLen >= payload.length
-    const frame = buildFrame(
-      payload.subarray(offset, offset + chunkLen),
-      isLast ? FLAG_LAST : 0,
-    )
-    state.pendingWrite.push({ bytes: frame, offset: 0 })
-    offset += chunkLen
+    const chunkLen = Math.min(payload.length - offset, MAX_CHUNK_PAYLOAD);
+    const isLast = offset + chunkLen >= payload.length;
+    const frame = buildFrame(payload.subarray(offset, offset + chunkLen), isLast ? FLAG_LAST : 0);
+    state.pendingWrite.push({ bytes: frame, offset: 0 });
+    offset += chunkLen;
   }
-}
+};
 
 // Copy `n` bytes from src into the ring at base+cursor, wrapping at RING_SIZE.
 // Uses Uint8Array.set (memcpy) for both the contiguous and split-wrap cases.
@@ -102,448 +96,492 @@ const ringWrite = (
   src: Uint8Array,
   n: number,
 ): void => {
-  const tail = RING_SIZE - cursor
+  const tail = RING_SIZE - cursor;
   if (n <= tail) {
-    buf.set(src.subarray(0, n), base + cursor)
+    buf.set(src.subarray(0, n), base + cursor);
   } else {
-    buf.set(src.subarray(0, tail), base + cursor)
-    buf.set(src.subarray(tail, n), base)
+    buf.set(src.subarray(0, tail), base + cursor);
+    buf.set(src.subarray(tail, n), base);
   }
-}
+};
 
 // Read `n` bytes from the ring starting at cursor into a fresh Uint8Array.
 const ringRead = (buf: Uint8Array, base: number, cursor: number, n: number): Uint8Array => {
-  const tail = RING_SIZE - cursor
-  if (n <= tail) return buf.slice(base + cursor, base + cursor + n)
-  const out = new Uint8Array(n)
-  out.set(buf.subarray(base + cursor, base + RING_SIZE), 0)
-  out.set(buf.subarray(base, base + n - tail), tail)
-  return out
-}
+  const tail = RING_SIZE - cursor;
+  if (n <= tail) {
+    return buf.slice(base + cursor, base + cursor + n);
+  }
+  const out = new Uint8Array(n);
+  out.set(buf.subarray(base + cursor, base + RING_SIZE), 0);
+  out.set(buf.subarray(base, base + n - tail), tail);
+  return out;
+};
 
 // Push as many bytes from pendingWrite as fit in the to-shim ring. Returns
 // true if at least one byte was written (caller should signal the shim).
 const flushToShim = (state: IpcState): boolean => {
-  let anyWritten = false
+  let anyWritten = false;
   while (state.pendingWrite.length > 0) {
-    const item = state.pendingWrite[0]!
-    const remaining = item.bytes.length - item.offset
+    const item = state.pendingWrite[0]!;
+    const remaining = item.bytes.length - item.offset;
     if (remaining <= 0) {
-      state.pendingWrite.shift()
-      continue
+      state.pendingWrite.shift();
+      continue;
     }
-    const w = readU32(state.buf, 8)
-    const r = readU32(state.buf, 12)
-    const space = ringFree(w, r)
-    if (space === 0) break
-    const toWrite = Math.min(remaining, space)
-    ringWrite(state.buf, TO_SHIM_OFFSET, w, item.bytes.subarray(item.offset), toWrite)
-    writeU32(state.buf, 8, (w + toWrite) % RING_SIZE)
-    item.offset += toWrite
-    anyWritten = true
+    const w = readU32(state.buf, 8);
+    const r = readU32(state.buf, 12);
+    const space = ringFree(w, r);
+    if (space === 0) {
+      break;
+    }
+    const toWrite = Math.min(remaining, space);
+    ringWrite(state.buf, TO_SHIM_OFFSET, w, item.bytes.subarray(item.offset), toWrite);
+    writeU32(state.buf, 8, (w + toWrite) % RING_SIZE);
+    item.offset += toWrite;
+    anyWritten = true;
     if (item.offset >= item.bytes.length) {
-      state.pendingWrite.shift()
+      state.pendingWrite.shift();
     } else {
       // Ring full; resume on next flush.
-      break
+      break;
     }
   }
-  return anyWritten
-}
+  return anyWritten;
+};
 
 const mergeReassembly = (state: IpcState): Uint8Array => {
   if (state.reassembly.length === 1) {
-    const out = state.reassembly[0]!
-    state.reassembly = []
-    state.reassemblyLen = 0
-    return out
+    const out = state.reassembly[0]!;
+    state.reassembly = [];
+    state.reassemblyLen = 0;
+    return out;
   }
-  const merged = new Uint8Array(state.reassemblyLen)
-  let p = 0
+  const merged = new Uint8Array(state.reassemblyLen);
+  let p = 0;
   for (const c of state.reassembly) {
-    merged.set(c, p)
-    p += c.length
+    merged.set(c, p);
+    p += c.length;
   }
-  state.reassembly = []
-  state.reassemblyLen = 0
-  return merged
-}
+  state.reassembly = [];
+  state.reassemblyLen = 0;
+  return merged;
+};
 
 // Drain the to-bun ring, reassembling chunked frames into complete messages.
 const readFromShim = (state: IpcState): IpcMessage[] => {
-  const messages: IpcMessage[] = []
+  const messages: IpcMessage[] = [];
 
   while (true) {
-    const w = readU32(state.buf, 0)
-    const r = readU32(state.buf, 4)
-    const used = ringAvailable(w, r)
-    if (used < FRAME_HEADER_SIZE) break
+    const w = readU32(state.buf, 0);
+    const r = readU32(state.buf, 4);
+    const used = ringAvailable(w, r);
+    if (used < FRAME_HEADER_SIZE) {
+      break;
+    }
 
-    const hdr = ringRead(state.buf, TO_BUN_OFFSET, r, FRAME_HEADER_SIZE)
-    const view = new DataView(hdr.buffer, hdr.byteOffset, hdr.byteLength)
-    const len = view.getUint32(0, true)
-    const flags = view.getUint32(4, true)
+    const hdr = ringRead(state.buf, TO_BUN_OFFSET, r, FRAME_HEADER_SIZE);
+    const view = new DataView(hdr.buffer, hdr.byteOffset, hdr.byteLength);
+    const len = view.getUint32(0, true);
+    const flags = view.getUint32(4, true);
 
-    if (used < FRAME_HEADER_SIZE + len) break
+    if (used < FRAME_HEADER_SIZE + len) {
+      break;
+    }
 
-    const payloadStart = (r + FRAME_HEADER_SIZE) % RING_SIZE
-    const payload = ringRead(state.buf, TO_BUN_OFFSET, payloadStart, len)
-    writeU32(state.buf, 4, (r + FRAME_HEADER_SIZE + len) % RING_SIZE)
+    const payloadStart = (r + FRAME_HEADER_SIZE) % RING_SIZE;
+    const payload = ringRead(state.buf, TO_BUN_OFFSET, payloadStart, len);
+    writeU32(state.buf, 4, (r + FRAME_HEADER_SIZE + len) % RING_SIZE);
 
     if (len > 0) {
-      state.reassembly.push(payload)
-      state.reassemblyLen += payload.length
+      state.reassembly.push(payload);
+      state.reassemblyLen += payload.length;
     }
 
     if (flags & FLAG_LAST) {
-      const merged = mergeReassembly(state)
+      const merged = mergeReassembly(state);
       try {
-        messages.push(JSON.parse(decoder.decode(merged)) as IpcMessage)
+        messages.push(JSON.parse(decoder.decode(merged)) as IpcMessage);
       } catch {
         // skip malformed; the next frame may begin a fresh message
       }
     }
   }
 
-  return messages
-}
+  return messages;
+};
 
 const copyAssets = async (srcDir: string, destDir: string): Promise<void> => {
-  const { readdir } = await import("fs/promises")
-  const entries = await readdir(srcDir, { withFileTypes: true }).catch(() => [])
+  const { readdir } = await import("node:fs/promises");
+  const entries = await readdir(srcDir, { withFileTypes: true }).catch(() => []);
   for (const entry of entries) {
-    const src = join(srcDir, entry.name)
-    const dest = join(destDir, entry.name)
+    const src = join(srcDir, entry.name);
+    const dest = join(destDir, entry.name);
     if (entry.isDirectory()) {
-      const { mkdir } = await import("fs/promises")
-      await mkdir(dest, { recursive: true })
-      await copyAssets(src, dest)
+      const { mkdir } = await import("node:fs/promises");
+      await mkdir(dest, { recursive: true });
+      await copyAssets(src, dest);
     } else {
-      const ext = entry.name.split(".").pop()?.toLowerCase() ?? ""
+      const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
       // Skip files the bundler handles — copy everything else (images, fonts, etc.)
       if (!["ts", "tsx", "js", "jsx", "css", "html"].includes(ext)) {
-        await Bun.write(dest, Bun.file(src))
+        await Bun.write(dest, Bun.file(src));
       }
     }
   }
-}
+};
 
 const bundleApp = async (projectDir: string, entry: string): Promise<string> => {
-  const outdir = join(projectDir, ".butter", "build")
+  const outdir = join(projectDir, ".butter", "build");
   await Bun.build({
     entrypoints: [join(projectDir, entry)],
     outdir,
     minify: false,
     sourcemap: "inline",
-  })
+  });
 
   // Copy static assets (images, fonts, etc.) that the bundler doesn't process
-  const appDir = join(projectDir, "src", "app")
-  await copyAssets(appDir, outdir)
+  const appDir = join(projectDir, "src", "app");
+  await copyAssets(appDir, outdir);
 
   // Strip crossorigin attributes (not needed with butter:// protocol, but harmless to remove)
-  const htmlPath = join(outdir, "index.html")
-  const html = await Bun.file(htmlPath).text()
-  await Bun.write(htmlPath, html.replaceAll(' crossorigin', ''))
+  const htmlPath = join(outdir, "index.html");
+  const html = await Bun.file(htmlPath).text();
+  await Bun.write(htmlPath, html.replaceAll(" crossorigin", ""));
 
-  return outdir
-}
+  return outdir;
+};
 
-let nextMsgId = 1
+let nextMsgId = 1;
 
 const makeMsg = (type: IpcMessage["type"], action: string, data?: unknown): IpcMessage => ({
   id: String(nextMsgId++),
   type,
   action,
   data,
-})
+});
 
 export const runDev = async (projectDir: string): Promise<void> => {
   // 1. Doctor checks
-  const results = await runDoctor()
-  const allOk = printDoctorResults(results)
+  const results = await runDoctor();
+  const allOk = printDoctorResults(results);
   if (!allOk) {
-    console.error("\nFix the issues above before running dev mode.")
-    process.exit(1)
+    console.error("\nFix the issues above before running dev mode.");
+    process.exit(1);
   }
 
   // 2. Load config
-  const config = await loadConfig(projectDir)
-  console.log(`\nStarting dev mode for "${config.window.title}"`)
+  const config = await loadConfig(projectDir);
+  console.log(`\nStarting dev mode for "${config.window.title}"`);
 
   // 3. Compile shim if stale
-  const source = shimSourcePath()
-  const binary = shimBinaryPath(projectDir)
+  const source = shimSourcePath();
+  const binary = shimBinaryPath(projectDir);
   if (await needsRecompile(binary, source)) {
-    console.log("Compiling native shim...")
-    await compileShim(projectDir)
+    console.log("Compiling native shim...");
+    await compileShim(projectDir);
   }
 
   // 4. Build native extensions (if any)
-  await buildNativeExtensions(projectDir)
+  await buildNativeExtensions(projectDir);
 
   // 5. Bundle app assets
-  console.log("Bundling app...")
-  const buildDir = await bundleApp(projectDir, config.build.entry)
-  await writeWebviewBundle(buildDir, config.plugins)
-  const htmlPath = join(buildDir, "index.html")
+  console.log("Bundling app...");
+  const buildDir = await bundleApp(projectDir, config.build.entry);
+  await writeWebviewBundle(buildDir, config.plugins);
+  const htmlPath = join(buildDir, "index.html");
 
   // 6. Create shared memory
-  const shmName = process.platform === "win32"
-    ? `butter_${process.pid}`
-    : `/butter_${process.pid}`
-  const region = createSharedRegion(shmName, SHM_SIZE)
+  const shmName = process.platform === "win32" ? `butter_${process.pid}` : `/butter_${process.pid}`;
+  const region = createSharedRegion(shmName, SHM_SIZE);
 
   // zero out the header
   for (let i = 0; i < HEADER_SIZE; i++) {
-    region.buffer[i] = 0
+    region.buffer[i] = 0;
   }
 
   // 6. Build env vars
   const env: Record<string, string> = {
     BUTTER_TITLE: config.window.title,
     BUTTER_DEV: "1",
-    BUTTER_APP_ID: config.bundle?.identifier ?? config.window.title.replace(/[^a-zA-Z0-9._-]/g, "_"),
-  }
+    BUTTER_APP_ID:
+      config.bundle?.identifier ?? config.window.title.replace(/[^a-zA-Z0-9._-]/g, "_"),
+  };
   if (config.window.icon) {
-    env.BUTTER_ICON = join(projectDir, config.window.icon)
+    env.BUTTER_ICON = join(projectDir, config.window.icon);
   }
   if (config.window.material && config.window.material !== "none") {
-    env.BUTTER_MATERIAL = config.window.material
+    env.BUTTER_MATERIAL = config.window.material;
   }
   if (config.security?.csp) {
-    env.BUTTER_CSP = config.security.csp
+    env.BUTTER_CSP = config.security.csp;
   }
   if (config.splash) {
-    env.BUTTER_SPLASH = join(projectDir, config.splash)
+    env.BUTTER_SPLASH = join(projectDir, config.splash);
   }
   if (config.bundle?.sidecars && config.bundle.sidecars.length > 0) {
     // name==absolutePath joined by ':::' so the sidecar plugin can read it in.
     env.BUTTER_SIDECARS = config.bundle.sidecars
       .map((rel) => {
-        const abs = join(projectDir, rel)
-        const name = rel.split("/").pop()?.replace(/\.exe$/, "") ?? rel
-        return `${name}==${abs}`
+        const abs = join(projectDir, rel);
+        const name =
+          rel
+            .split("/")
+            .pop()
+            ?.replace(/\.exe$/, "") ?? rel;
+        return `${name}==${abs}`;
       })
-      .join(":::")
+      .join(":::");
   }
   // The host process also reads BUTTER_APP_ID/BUTTER_SIDECARS for its plugins.
-  process.env.BUTTER_APP_ID = env.BUTTER_APP_ID
-  if (env.BUTTER_SIDECARS) process.env.BUTTER_SIDECARS = env.BUTTER_SIDECARS
+  process.env.BUTTER_APP_ID = env.BUTTER_APP_ID;
+  if (env.BUTTER_SIDECARS) {
+    process.env.BUTTER_SIDECARS = env.BUTTER_SIDECARS;
+  }
 
   // Load and pass menu if present
-  const menu = await loadMenu(projectDir)
+  const menu = await loadMenu(projectDir);
   if (menu) {
-    env.BUTTER_MENU = serializeMenu(menu, process.platform)
+    env.BUTTER_MENU = serializeMenu(menu, process.platform);
   }
 
   // Spawn shim
-  console.log("Launching window...")
-  const shimProc = await spawnShim(binary, shmName, htmlPath, env)
+  console.log("Launching window...");
+  const shimProc = await spawnShim(binary, shmName, htmlPath, env);
 
   // 7. Set up runtime and import host code
-  const runtime = createRuntime(config.window)
-  globalThis.__butterRuntime = runtime
+  const runtime = createRuntime(config.window);
+  globalThis.__butterRuntime = runtime;
 
   // 7a. Load plugins BEFORE the user's host code so plugin-registered
   // handlers exist when host code or the webview start invoking actions.
   // The user can still register their own handlers afterwards (and override
   // a plugin's action if they really want to — last writer wins in the
   // runtime's handler map).
-  loadHostPlugins(config.plugins, runtime)
+  loadHostPlugins(config.plugins, runtime);
 
   try {
-    const hostPath = join(projectDir, config.build.host)
-    await import(hostPath)
+    const hostPath = join(projectDir, config.build.host);
+    await import(hostPath);
   } catch (err) {
-    console.error("Failed to load host code:", err)
+    console.error("Failed to load host code:", err);
   }
 
   // 7b. Boot MCP dev server
-  const mcpEnabled = config.dev?.mcp?.enabled !== false && process.env.BUTTER_MCP !== "0"
-  const mcpPort = Number(process.env.BUTTER_MCP_PORT ?? config.dev?.mcp?.port ?? 4711)
-  const mcpBufferSize = config.dev?.mcp?.consoleBuffer ?? 1000
+  const mcpEnabled = config.dev?.mcp?.enabled !== false && process.env.BUTTER_MCP !== "0";
+  const mcpPort = Number(process.env.BUTTER_MCP_PORT ?? config.dev?.mcp?.port ?? 4711);
+  const mcpBufferSize = config.dev?.mcp?.consoleBuffer ?? 1000;
 
-  let mcpServer: ReturnType<typeof createMcpServer> | null = null
+  let mcpServer: ReturnType<typeof createMcpServer> | null = null;
   if (mcpEnabled) {
     mcpServer = createMcpServer({
       port: mcpPort,
       consoleBuffer: mcpBufferSize,
       control: (action, data) => runtime.control(action, data),
-    })
+    });
     try {
-      await mcpServer.start()
-      console.log(`  MCP server listening on http://127.0.0.1:${mcpPort}/mcp`)
-    } catch (err) {
+      await mcpServer.start();
+      console.log(`  MCP server listening on http://127.0.0.1:${mcpPort}/mcp`);
+    } catch (_err) {
       console.error(
         `MCP port ${mcpPort} is already in use. Set dev.mcp.port in butter.yaml ` +
-        `or BUTTER_MCP_PORT env var, or set dev.mcp.enabled: false to disable.`,
-      )
-      process.exit(1)
+          `or BUTTER_MCP_PORT env var, or set dev.mcp.enabled: false to disable.`,
+      );
+      process.exit(1);
     }
 
     runtime.tap("console:message", (data) => {
-      const m = data as { level: string; text: string }
-      mcpServer?.recordConsole({ level: m.level as "log" | "warn" | "error" | "info", text: m.text })
-    })
+      const m = data as { level: string; text: string };
+      mcpServer?.recordConsole({
+        level: m.level as "log" | "warn" | "error" | "info",
+        text: m.text,
+      });
+    });
   } else {
-    console.log("  MCP server: disabled")
+    console.log("  MCP server: disabled");
   }
 
   // 8. Build allow matcher. Union of flat `security.allowlist` (back-compat)
   // and `security.capabilities[].actions`. If neither is set, all actions
   // are allowed (no security policy declared).
-  const flatPatterns = config.security?.allowlist ?? null
-  const capabilities = config.security?.capabilities ?? null
-  const hasPolicy = flatPatterns !== null || (capabilities && capabilities.length > 0)
+  const flatPatterns = config.security?.allowlist ?? null;
+  const capabilities = config.security?.capabilities ?? null;
+  const hasPolicy = flatPatterns !== null || (capabilities && capabilities.length > 0);
   const matches = (action: string, pattern: string): boolean => {
-    if (pattern === "*") return true
-    if (pattern.endsWith(":*")) return action.startsWith(pattern.slice(0, -1))
-    return action === pattern
-  }
+    if (pattern === "*") {
+      return true;
+    }
+    if (pattern.endsWith(":*")) {
+      return action.startsWith(pattern.slice(0, -1));
+    }
+    return action === pattern;
+  };
   const isAllowed = (action: string): boolean => {
-    if (!hasPolicy) return true
-    if (flatPatterns && flatPatterns.some((p) => matches(action, p))) return true
+    if (!hasPolicy) {
+      return true;
+    }
+    if (flatPatterns?.some((p) => matches(action, p))) {
+      return true;
+    }
     if (capabilities) {
       for (const cap of capabilities) {
-        if (cap.actions.some((p) => matches(action, p))) return true
+        if (cap.actions.some((p) => matches(action, p))) {
+          return true;
+        }
       }
     }
-    return false
-  }
+    return false;
+  };
 
   // 9. Poll loop
-  let running = true
-  const ipc = createIpcState(region.buffer)
+  let running = true;
+  const ipc = createIpcState(region.buffer);
 
   const sendMessage = (msg: IpcMessage): void => {
-    enqueueOutgoing(ipc, msg)
-  }
+    enqueueOutgoing(ipc, msg);
+  };
 
   const poll = () => {
-    if (!running) return
+    if (!running) {
+      return;
+    }
 
     // Read messages from shim
-    const incoming = readFromShim(ipc)
+    const incoming = readFromShim(ipc);
     for (const msg of incoming) {
       if (msg.type === "invoke") {
         const sendResponse = (result: unknown, error?: string) => {
-          const response = makeMsg("response", msg.action, result)
-          response.id = msg.id
-          if (error) response.error = error
-          sendMessage(response)
-        }
+          const response = makeMsg("response", msg.action, result);
+          response.id = msg.id;
+          if (error) {
+            response.error = error;
+          }
+          sendMessage(response);
+        };
 
         // Enforce allowlist
         if (!isAllowed(msg.action)) {
-          sendResponse(undefined, `Action "${msg.action}" is not allowed by security.allowlist`)
-          continue
+          sendResponse(undefined, `Action "${msg.action}" is not allowed by security.allowlist`);
+          continue;
         }
 
         try {
-          const result = runtime.dispatch(msg.action, msg.data)
+          const result = runtime.dispatch(msg.action, msg.data);
           if (result instanceof Promise) {
             result.then(
               (v) => sendResponse(v),
               (e) => sendResponse(undefined, e instanceof Error ? e.message : String(e)),
-            )
+            );
           } else {
-            sendResponse(result)
+            sendResponse(result);
           }
         } catch (err) {
-          sendResponse(undefined, err instanceof Error ? err.message : String(err))
+          sendResponse(undefined, err instanceof Error ? err.message : String(err));
         }
       } else if (msg.type === "response") {
         // Control responses from the shim (dialogs, window ops) — resolve pending promise
-        runtime.resolveControl(msg.id, msg.data)
+        runtime.resolveControl(msg.id, msg.data);
       } else if (msg.type === "event") {
         // Menu actions and other events from the shim — dispatch to host handlers
-        runtime.dispatch(msg.action, msg.data)
+        runtime.dispatch(msg.action, msg.data);
       } else if (msg.type === "control" && msg.action === "quit") {
-        running = false
-        return
+        running = false;
+        return;
       }
     }
 
     // Queue outgoing events (chunked into frames as needed)
-    const outgoing = runtime.drainOutgoing()
+    const outgoing = runtime.drainOutgoing();
     for (const msg of outgoing) {
-      enqueueOutgoing(ipc, msg)
+      enqueueOutgoing(ipc, msg);
     }
 
     // Push as many bytes as fit; signal the shim if anything was written.
     if (flushToShim(ipc)) {
-      signalToShim(region)
+      signalToShim(region);
     }
 
-    setTimeout(poll, POLL_MS)
-  }
+    setTimeout(poll, POLL_MS);
+  };
 
-  poll()
+  poll();
 
   // 9. Watch for file changes (debounced)
-  const srcDir = join(projectDir, "src")
-  let rebuildTimer: ReturnType<typeof setTimeout> | null = null
+  const srcDir = join(projectDir, "src");
+  let rebuildTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const watcher = watch(srcDir, { recursive: true }, (eventType, filename) => {
-    if (!filename || !running) return
-    if (rebuildTimer) clearTimeout(rebuildTimer)
+  const watcher = watch(srcDir, { recursive: true }, (_eventType, filename) => {
+    if (!filename || !running) {
+      return;
+    }
+    if (rebuildTimer) {
+      clearTimeout(rebuildTimer);
+    }
     rebuildTimer = setTimeout(async () => {
-      rebuildTimer = null
-      console.log(`File changed: ${filename}, rebuilding...`)
+      rebuildTimer = null;
+      console.log(`File changed: ${filename}, rebuilding...`);
       try {
-        await bundleApp(projectDir, config.build.entry)
-        await writeWebviewBundle(buildDir, config.plugins)
-        enqueueOutgoing(ipc, makeMsg("control", "reload"))
-        if (flushToShim(ipc)) signalToShim(region)
+        await bundleApp(projectDir, config.build.entry);
+        await writeWebviewBundle(buildDir, config.plugins);
+        enqueueOutgoing(ipc, makeMsg("control", "reload"));
+        if (flushToShim(ipc)) {
+          signalToShim(region);
+        }
       } catch (err) {
-        console.error("Rebuild failed:", err)
+        console.error("Rebuild failed:", err);
       }
-    }, 200)
-  })
+    }, 200);
+  });
 
   // 10. Cleanup helper
-  let cleaned = false
+  let cleaned = false;
   const cleanup = async () => {
-    if (cleaned) return
-    cleaned = true
-    running = false
-    if (mcpServer) {
-      try { await mcpServer.stop() } catch {}
-      mcpServer = null
+    if (cleaned) {
+      return;
     }
-    watcher.close()
-    try { destroySharedRegion(shmName) } catch {}
-  }
+    cleaned = true;
+    running = false;
+    if (mcpServer) {
+      try {
+        await mcpServer.stop();
+      } catch {}
+      mcpServer = null;
+    }
+    watcher.close();
+    try {
+      destroySharedRegion(shmName);
+    } catch {}
+  };
 
   // 11. Handle shim exit
   shimProc.exited.then(async () => {
-    await cleanup()
-    console.log("\nWindow closed.")
-    process.exit(0)
-  })
+    await cleanup();
+    console.log("\nWindow closed.");
+    process.exit(0);
+  });
 
   // 12. Handle SIGINT
   process.on("SIGINT", () => {
-    console.log("\nShutting down...")
-    enqueueOutgoing(ipc, makeMsg("control", "quit"))
-    if (flushToShim(ipc)) signalToShim(region)
+    console.log("\nShutting down...");
+    enqueueOutgoing(ipc, makeMsg("control", "quit"));
+    if (flushToShim(ipc)) {
+      signalToShim(region);
+    }
     setTimeout(async () => {
-      await cleanup()
-      process.exit(0)
-    }, 1000)
-  })
+      await cleanup();
+      process.exit(0);
+    }, 1000);
+  });
 
   // 13. Handle unexpected crashes — clean up shared memory
   process.on("uncaughtException", async (err) => {
-    console.error("Uncaught exception:", err)
-    await cleanup()
-    process.exit(1)
-  })
+    console.error("Uncaught exception:", err);
+    await cleanup();
+    process.exit(1);
+  });
 
   process.on("unhandledRejection", async (err) => {
-    console.error("Unhandled rejection:", err)
-    await cleanup()
-    process.exit(1)
-  })
-}
+    console.error("Unhandled rejection:", err);
+    await cleanup();
+    process.exit(1);
+  });
+};
