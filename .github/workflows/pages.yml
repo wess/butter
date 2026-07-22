@@ -30,6 +30,12 @@ jobs:
         run: |
           set -euo pipefail
           rm -f site/serve.ts          # local preview server, not part of the site
+          # Pages serves HTML with max-age=600 but CSS/JS with max-age=14400, so a
+          # stylesheet change stays stale for hours after the markup updates.
+          # Fingerprint the refs with the commit so each deploy busts the edge cache.
+          v="${GITHUB_SHA:0:8}"
+          sed -i -e "s|href=\"styles.css\"|href=\"styles.css?v=$v\"|g" \
+                 -e "s|src=\"app.js\"|src=\"app.js?v=$v\"|g" site/*.html
           touch site/.nojekyll
           cd site
           git init -q -b gh-pages
