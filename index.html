@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Butter — a lightweight desktop app framework for Bun</title>
+    <meta
+      name="description"
+      content="Butter is a lightweight desktop app framework: a native window with a webview, a shared-memory IPC bridge between your TypeScript backend and frontend, native C / Moxy / Rust / Zig extensions, and single-file binary output. Powered by Bun."
+    />
+    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="apple-touch-icon" href="logo.png" />
+    <meta property="og:image" content="https://wess.io/butter/logo.png" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="styles.css?v=d39e87cc" />
+    <style>:root{--accent:#f5b301;--accent2:#e07b00}</style>
+  </head>
+  <body>
+    <!-- nav -->
+    <nav class="nav">
+      <div class="wrap">
+        <a class="brand" href="index.html"><img class="mark" src="logo.png" width="256" height="246" alt="" /> Butter</a>
+        <button class="navtoggle" aria-label="Menu" data-nav>☰</button>
+        <div class="navlinks" data-navlinks>
+          <a href="#features">Features</a>
+          <a href="#how">How it works</a>
+          <a href="#start">Get started</a>
+          <a href="docs.html">Docs</a>
+          <a class="btn primary" href="https://github.com/wess/butter">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- hero -->
+    <header class="hero">
+      <div class="wrap">
+        <span class="pill"><span class="dot"></span> Native webview · TypeScript both sides · single-file binary</span>
+        <h1>Desktop apps that are <span class="accent">native, tiny, and all TypeScript</span>.</h1>
+        <p class="lead">
+          Butter gives you a native window with a webview and a direct IPC bridge between your TypeScript
+          backend and your frontend — no bundled browser engine, no background servers. Write native C,
+          Moxy, Rust, or Zig and call it straight from TypeScript. Powered by Bun.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="#start">Get started</a>
+          <a class="btn ghost" href="https://github.com/wess/butter">View on GitHub →</a>
+        </div>
+
+        <!-- diagram mockup -->
+        <div class="mock">
+          <div class="bar">
+            <span class="hash">⌘</span><span>myapp</span>
+            <span class="muted" style="font-size: 13px">· native window, ~60MB</span>
+            <span class="dots"><i></i><i></i><i></i></span>
+          </div>
+          <div class="body">
+            <div class="msg">
+              <div class="av" style="background: linear-gradient(135deg, #f5b301, #e07b00)">🖥️</div>
+              <div>
+                <div class="who">Bun process <small>host · TypeScript</small></div>
+                <div class="txt"><code>on("greet", (name) =&gt; `Hello, ${name}!`)</code></div>
+              </div>
+            </div>
+            <div class="msg">
+              <div class="av">🪟</div>
+              <div>
+                <div class="who">Native shim <small>WKWebView · WebKitGTK · WebView2</small></div>
+                <div class="txt"><code>await butter.invoke("greet", "World")</code></div>
+              </div>
+            </div>
+            <div class="msg">
+              <div class="av" style="background: linear-gradient(135deg, #f5b301, #e07b00)">⚙️</div>
+              <div>
+                <div class="who">Native FFI <small>C · Moxy · Rust · Zig</small></div>
+                <div class="txt">
+                  <code>const math = await native("math"); math.fibonacci(20)</code>
+                  <span class="men">→ 6765, computed natively</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- features -->
+    <section class="block" id="features">
+      <div class="wrap">
+        <div class="eyebrow">Features</div>
+        <h2>Everything Electron has, at a fraction of the size.</h2>
+        <p class="sub">No bundled Chromium, no Node, no Rust required. Just Bun, the OS webview, and your TypeScript.</p>
+        <div class="grid">
+          <div class="card">
+            <div class="ico">🪟</div>
+            <h3>Native webview</h3>
+            <p>Uses the OS webview — WKWebView on macOS, WebKitGTK on Linux, WebView2 on Windows. No bundled browser engine.</p>
+          </div>
+          <div class="card">
+            <div class="ico">⚡</div>
+            <h3>Shared-memory IPC</h3>
+            <p>A direct bridge between host and webview over a 128KB shared-memory ring buffer. Length-prefixed frames, no pipes.</p>
+          </div>
+          <div class="card">
+            <div class="ico">🟦</div>
+            <h3>TypeScript on both sides</h3>
+            <p>Your backend runs in Bun, your frontend in the webview — one language end to end, with typed IPC if you want it.</p>
+          </div>
+          <div class="card">
+            <div class="ico">⚙️</div>
+            <h3>Native extensions</h3>
+            <p>Drop a .c, .mxy, .rs, or .zig file into src/native/ — Butter auto-compiles it and generates typed FFI bindings.</p>
+          </div>
+          <div class="card">
+            <div class="ico">📦</div>
+            <h3>Single-file binary</h3>
+            <p>butter compile embeds every asset and the shim into one ~60MB executable. No installer plumbing required.</p>
+          </div>
+          <div class="card">
+            <div class="ico">🚀</div>
+            <h3>Installers built in</h3>
+            <p>butter package produces a DMG on macOS, an AppImage on Linux, and an NSIS setup.exe on Windows.</p>
+          </div>
+          <div class="card">
+            <div class="ico">🔌</div>
+            <h3>Batteries-included plugins</h3>
+            <p>Dialogs, tray, notifications, clipboard, global shortcuts, SQLite, KV store, sidecars, auto-update, and more.</p>
+          </div>
+          <div class="card">
+            <div class="ico">🔒</div>
+            <h3>Capability permissions</h3>
+            <p>Lock down what the webview can invoke with a flat allowlist or grouped capabilities, plus a configurable CSP.</p>
+          </div>
+          <div class="card">
+            <div class="ico">🔥</div>
+            <h3>Hot-reloading dev mode</h3>
+            <p>butter dev opens a native window with DevTools, recompiles native code, and reloads on file changes.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- how it works -->
+    <section class="block" id="how">
+      <div class="wrap">
+        <div class="eyebrow">How it works</div>
+        <h2>Two processes, one ring buffer.</h2>
+        <p class="sub">
+          A Bun process runs your host TypeScript; a native shim owns the window and webview. They talk
+          over shared memory — no web server, no file:// CORS.
+        </p>
+        <div class="steps">
+          <div class="step">
+            <h4>Bun runs the host</h4>
+            <p>Your backend TypeScript runs in Bun. Register handlers with on(), push events with send().</p>
+          </div>
+          <div class="step">
+            <h4>The shim owns the window</h4>
+            <p>A tiny native shim opens an OS webview and serves your assets over the butter:// protocol.</p>
+          </div>
+          <div class="step">
+            <h4>They talk over shared memory</h4>
+            <p>Two ring buffers carry length-prefixed JSON frames between host and webview at 60 Hz.</p>
+          </div>
+          <div class="step">
+            <h4>Native code when you need it</h4>
+            <p>C / Moxy / Rust / Zig sources auto-compile to a shared library and bind directly via FFI.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- architecture -->
+    <section class="block" id="architecture">
+      <div class="wrap">
+        <div class="eyebrow">Architecture</div>
+        <h2>No bundled browser. No background server.</h2>
+        <div class="split">
+          <ul>
+            <li><span class="ck">✦</span><span><b>No web server</b> — assets are served through the <code>butter://</code> custom protocol, sidestepping file:// CORS.</span></li>
+            <li><span class="ck">✦</span><span><b>No bundled browser</b> — Butter uses the OS native webview, so binaries stay around ~60MB.</span></li>
+            <li><span class="ck">✦</span><span><b>Shared-memory IPC</b> — 128KB region: a 64B header plus two equal ring buffers, host ↔ webview.</span></li>
+            <li><span class="ck">✦</span><span><b>Native extensions</b> — C, Moxy, Rust, and Zig all cross the C ABI, fingerprinted so rebuilds only run on change.</span></li>
+            <li><span class="ck">✦</span><span><b>Single binary</b> — <code>butter compile</code> strips symbols and embeds everything into one executable.</span></li>
+          </ul>
+          <div class="diagram">   Bun process (host TS)        Native shim (child)
+   import { on } from           native window
+     "butter"          IPC      WKWebView (macOS)
+   native via FFI:     <-->     WebKitGTK (Linux)
+   C / Moxy / Rust / Zig        WebView2 (Windows)
+
+          128KB shared-memory ring buffer
+   ┌────────┬───────────────┬───────────────┐
+   │ header │ host → webview │ webview → host │
+   │  64B   │  ring buffer   │  ring buffer   │
+   └────────┴───────────────┴───────────────┘</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- get started -->
+    <section class="block" id="start">
+      <div class="wrap">
+        <div class="eyebrow">Get started</div>
+        <h2>From zero to a native window in minutes.</h2>
+        <p class="sub">Requires Bun v1.2+. Install the CLI, scaffold a project, and run a native dev window.</p>
+        <div class="code" style="margin-top: 32px; max-width: 720px">
+          <div class="top">
+            <span>terminal</span>
+            <button class="copy" data-copy>Copy</button>
+          </div>
+          <pre data-code><span class="c"># 1. install the CLI (Bun v1.2+)</span>
+bun add -g butterframework
+<span class="c"># or: brew tap wess/packages && brew install butter</span>
+
+<span class="c"># 2. create a new project</span>
+butter init myapp
+cd myapp
+bun install
+
+<span class="c"># 3. develop in a native window (hot reload + DevTools)</span>
+bun run dev
+
+<span class="c"># 4. ship a single-file binary, then a DMG / AppImage / installer</span>
+bun run build
+butter package</pre>
+        </div>
+        <p class="sub" style="margin-top: 24px">
+          Templates: <code>vanilla</code> (default), <code>react</code>, <code>svelte</code>, <code>vue</code> —
+          e.g. <code>butter init myapp --template react</code>. Verify your toolchain with <code>butter doctor</code>.
+        </p>
+      </div>
+    </section>
+
+    <!-- cta band -->
+    <section class="band">
+      <div class="wrap">
+        <h2>Build something native today.</h2>
+        <p>Open source under MIT. TypeScript on both sides, native performance where you need it, zero configuration.</p>
+        <div class="cta">
+          <a class="btn primary" href="docs.html">Read the docs</a>
+          <a class="btn ghost" href="https://github.com/wess/butter">Star it on GitHub →</a>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div class="wrap">
+        <a class="brand" href="index.html"><img class="mark" src="logo.png" width="256" height="246" alt="" /> Butter</a>
+        <div class="links">
+          <a href="docs.html">Docs</a>
+          <a href="https://github.com/wess/butter/blob/main/docs/tutorial/gettingstarted.md">Quick start</a>
+          <a href="https://github.com/wess/butter/blob/main/docs/reference/api.md">API</a>
+          <a href="https://github.com/wess/butter">GitHub</a><a href="https://github.com/sponsors/wess">♥ Sponsor</a>
+        </div>
+        <span>MIT · © 2026</span>
+      </div>
+    </footer>
+
+    <script src="app.js?v=d39e87cc"></script>
+  </body>
+</html>

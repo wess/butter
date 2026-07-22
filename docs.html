@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Documentation — Butter</title>
+    <meta name="description" content="Documentation for Butter: the getting-started tutorial, IPC, menus, native extensions, plugins, the API and CLI reference, configuration, architecture, and typed IPC." />
+    <link rel="icon" type="image/png" href="icon.png" />
+    <link rel="apple-touch-icon" href="logo.png" />
+    <meta property="og:image" content="https://wess.io/butter/logo.png" />
+    <meta name="twitter:card" content="summary" />
+    <link rel="stylesheet" href="styles.css?v=d39e87cc" />
+    <style>:root{--accent:#f5b301;--accent2:#e07b00}</style>
+  </head>
+  <body>
+    <nav class="nav">
+      <div class="wrap">
+        <a class="brand" href="index.html"><img class="mark" src="logo.png" width="256" height="246" alt="" /> Butter</a>
+        <button class="navtoggle" aria-label="Menu" data-nav>☰</button>
+        <div class="navlinks" data-navlinks>
+          <a href="index.html#features">Features</a>
+          <a href="index.html#how">How it works</a>
+          <a href="index.html#start">Get started</a>
+          <a href="docs.html">Docs</a>
+          <a class="btn primary" href="https://github.com/wess/butter">GitHub</a>
+        </div>
+      </div>
+    </nav>
+
+    <header class="dochero">
+      <div class="wrap">
+        <div class="eyebrow">Documentation</div>
+        <h2 style="font-size: clamp(28px, 5vw, 40px); font-weight: 800; letter-spacing: -0.02em">Everything about Butter.</h2>
+        <p class="sub">
+          The full reference lives as Markdown in the <code>docs/</code> folder. Start with the tutorial,
+          then dive into the concepts and the reference. Each card links straight to the source document.
+        </p>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <div class="docsection">Tutorial</div>
+      <div class="docgrid">
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/index.md">
+          <div class="t"><span class="ico">📖</span> Overview</div>
+          <p>The tutorial map and what you'll build, step by step.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/gettingstarted.md">
+          <div class="t"><span class="ico">🚀</span> Getting started</div>
+          <p>Install the CLI, scaffold a project, and open your first native window.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/ipc.md">
+          <div class="t"><span class="ico">🔁</span> IPC</div>
+          <p>Call host handlers from the webview, push events back, and stream results.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/menus.md">
+          <div class="t"><span class="ico">🍔</span> Menus</div>
+          <p>Define native menus and wire menu actions to IPC handlers.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/native.md">
+          <div class="t"><span class="ico">⚙️</span> Native extensions</div>
+          <p>Write C / Moxy / Rust / Zig and call it directly from TypeScript.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/plugins.md">
+          <div class="t"><span class="ico">🔌</span> Plugins</div>
+          <p>Enable built-in plugins for dialogs, storage, power, sidecars, and more.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/tutorial/building.md">
+          <div class="t"><span class="ico">📦</span> Building</div>
+          <p>Compile a single binary, bundle, package, sign, and distribute.</p>
+        </a>
+      </div>
+
+      <div class="docsection">Concepts</div>
+      <div class="docgrid">
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/concepts/embedded-chrome.md">
+          <div class="t"><span class="ico">🧭</span> Embedded chrome</div>
+          <p>How the native webview, shim, and custom protocol fit together.</p>
+        </a>
+      </div>
+
+      <div class="docsection">Reference</div>
+      <div class="docgrid">
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/index.md">
+          <div class="t"><span class="ico">📚</span> Reference overview</div>
+          <p>The map of the reference docs and where to find each topic.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/api.md">
+          <div class="t"><span class="ico">🔗</span> API</div>
+          <p>The host and webview APIs: on, send, invoke, stream, store, db, and events.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/cli.md">
+          <div class="t"><span class="ico">⌨️</span> CLI</div>
+          <p>init, dev, compile, bundle, package, sign, and doctor — every command.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/config.md">
+          <div class="t"><span class="ico">⚙️</span> Configuration</div>
+          <p>The butter.yaml schema: window, build, bundle, security, splash, plugins.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/native.md">
+          <div class="t"><span class="ico">🧮</span> Native</div>
+          <p>The FFI bindings, export markers, build matrix, and fingerprint caching.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/types.md">
+          <div class="t"><span class="ico">🟦</span> Types</div>
+          <p>Typed IPC contracts: createTypedHandlers and createTypedInvoke.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/docs/reference/architecture.md">
+          <div class="t"><span class="ico">🏗️</span> Architecture</div>
+          <p>Process topology, the ring-buffer protocol, and the runtime layers.</p>
+        </a>
+      </div>
+
+      <div class="docsection">Source</div>
+      <div class="docgrid">
+        <a class="doccard" href="https://github.com/wess/butter/blob/main/README.md">
+          <div class="t"><span class="ico">📄</span> Readme</div>
+          <p>The full project README: install, quick start, API, plugins, platforms.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter">
+          <div class="t"><span class="ico">🐙</span> Source</div>
+          <p>Browse the framework and CLI source on GitHub.</p>
+        </a>
+        <a class="doccard" href="https://github.com/wess/butter/issues">
+          <div class="t"><span class="ico">🐛</span> Issues</div>
+          <p>Report a bug or request a feature on the issue tracker.</p>
+        </a>
+      </div>
+    </main>
+
+    <footer style="margin-top: 60px">
+      <div class="wrap">
+        <a class="brand" href="index.html"><img class="mark" src="logo.png" width="256" height="246" alt="" /> Butter</a>
+        <div class="links">
+          <a href="index.html">Home</a>
+          <a href="https://github.com/wess/butter/blob/main/README.md">Readme</a>
+          <a href="https://github.com/wess/butter/blob/main/docs/reference/api.md">API</a>
+          <a href="https://github.com/wess/butter">GitHub</a><a href="https://github.com/sponsors/wess">♥ Sponsor</a>
+        </div>
+        <span>MIT · © 2026</span>
+      </div>
+    </footer>
+
+    <script src="app.js?v=d39e87cc"></script>
+  </body>
+</html>
