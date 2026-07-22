@@ -74,15 +74,12 @@ img {
   font-weight: 700;
   font-size: 17px;
 }
+/* the mascot carries its own outline and shape — no tile behind it */
 .brand .mark {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--accent), var(--accent2));
-  color: #fff;
-  font-size: 17px;
+  width: 32px;
+  height: 32px;
+  display: block;
+  object-fit: contain;
 }
 .navlinks {
   display: flex;
