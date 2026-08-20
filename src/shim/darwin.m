@@ -308,6 +308,15 @@ static NSString *CONSOLE_WRAPPER_JS =
 
 static NSString *g_assetDir = nil;
 
+/*
+ * Separates a window tag from that window's own message id.
+ *
+ * Every window's bridge numbers its messages from 1, so raw ids collide
+ * across windows. Ids arriving from a webview are tagged with their origin
+ * window on the way to the host and untagged on the way back.
+ */
+#define BUTTER_ID_SEP @"::"
+
 @interface ButterSchemeHandler : NSObject <WKURLSchemeHandler>
 @end
 
@@ -387,6 +396,8 @@ static id g_globalMonitor = nil;
 @property (nonatomic, strong) NSWindow *window;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, NSWindow *> *windows;
 @property (nonatomic, strong) NSMutableDictionary<NSString *, WKWebView *> *webviews;
+/* Tagged message id -> the webview waiting on that reply. */
+@property (nonatomic, strong) NSMutableDictionary<NSString *, WKWebView *> *pendingSenders;
 @property (nonatomic, strong) NSStatusItem *statusItem;
 @end
 
@@ -397,6 +408,7 @@ static id g_globalMonitor = nil;
     if (self) {
         _windows = [NSMutableDictionary dictionary];
         _webviews = [NSMutableDictionary dictionary];
+        _pendingSenders = [NSMutableDictionary dictionary];
 
         /* Register for sleep/wake notifications */
         NSNotificationCenter *wsnc = [[NSWorkspace sharedWorkspace] notificationCenter];
@@ -507,7 +519,101 @@ static id g_globalMonitor = nil;
         return;
     }
 
+    /*
+     * Tag the id with the window that sent it, so the host's reply can be
+     * routed back to that window instead of always to the main one.
+     */
+    NSString *bodyId = [parsedBody[@"id"] isKindOfClass:[NSString class]] ? parsedBody[@"id"] : nil;
+    if (message.webView && bodyId.length) {
+        NSMutableDictionary *tagged = [parsedBody mutableCopy];
+        NSString *taggedId = [NSString stringWithFormat:@"%@%@%@",
+            [self tagForWebview:message.webView], BUTTER_ID_SEP, bodyId];
+        tagged[@"id"] = taggedId;
+        NSData *out = [NSJSONSerialization dataWithJSONObject:tagged options:0 error:nil];
+        if (out) {
+            self.pendingSenders[taggedId] = message.webView;
+            ring_write_tb([out bytes], [out length]);
+            return;
+        }
+    }
+
     ring_write_tb(utf8, strlen(utf8));
+}
+
+/* Identifier for a webview: its windowId, or "main" for the primary window. */
+- (NSString *)tagForWebview:(WKWebView *)webview {
+    if (webview == self.webview) return @"main";
+    for (NSString *windowId in [self.webviews allKeys]) {
+        if (self.webviews[windowId] == webview) return windowId;
+    }
+    return @"main";
+}
+
+/* A closed window will never read its replies; drop them so the map does
+   not grow for the life of the process. */
+- (void)dropPendingForWebview:(WKWebView *)webview {
+    if (!webview) return;
+    for (NSString *key in [self.pendingSenders allKeys]) {
+        if (self.pendingSenders[key] == webview) [self.pendingSenders removeObjectForKey:key];
+    }
+}
+
+/*
+ * Deliver one host message to the right place.
+ *
+ * A response or chunk goes only to the window that asked, with its original
+ * id restored. Everything else is an event, which any window may be
+ * listening for, so it goes to all of them.
+ */
+- (void)deliverJson:(NSString *)json {
+    if (!json) return;
+
+    NSData *jdata = [json dataUsingEncoding:NSUTF8StringEncoding];
+    NSDictionary *parsed = jdata
+        ? [NSJSONSerialization JSONObjectWithData:jdata options:0 error:nil]
+        : nil;
+    if (![parsed isKindOfClass:[NSDictionary class]]) parsed = nil;
+
+    NSString *type = [parsed[@"type"] isKindOfClass:[NSString class]] ? parsed[@"type"] : nil;
+    NSString *mid = [parsed[@"id"] isKindOfClass:[NSString class]] ? parsed[@"id"] : nil;
+    NSString *payload = json;
+    WKWebView *target = nil;
+
+    NSRange sep = mid ? [mid rangeOfString:BUTTER_ID_SEP] : NSMakeRange(NSNotFound, 0);
+    if (sep.location != NSNotFound) {
+        target = self.pendingSenders[mid];
+        /* A chunk is one of many for the same request; the mapping has to
+           survive until the terminating response arrives. */
+        if ([type isEqualToString:@"response"]) [self.pendingSenders removeObjectForKey:mid];
+
+        NSMutableDictionary *restored = [parsed mutableCopy];
+        restored[@"id"] = [mid substringFromIndex:sep.location + sep.length];
+        NSData *out = [NSJSONSerialization dataWithJSONObject:restored options:0 error:nil];
+        if (out) payload = [[NSString alloc] initWithData:out encoding:NSUTF8StringEncoding];
+    }
+
+    NSString *escaped = [payload stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
+    escaped = [escaped stringByReplacingOccurrencesOfString:@"\r" withString:@"\\r"];
+    NSString *js = [NSString stringWithFormat:@"window.__butterReceive('%@')", escaped];
+
+    if (target) {
+        [target evaluateJavaScript:js completionHandler:nil];
+        return;
+    }
+
+    /* An untagged response predates tagging or lost its sender — the main
+       window is the only sane destination. */
+    if ([type isEqualToString:@"response"] || [type isEqualToString:@"chunk"]) {
+        [self.webview evaluateJavaScript:js completionHandler:nil];
+        return;
+    }
+
+    if (self.webview) [self.webview evaluateJavaScript:js completionHandler:nil];
+    for (WKWebView *webview in [self.webviews allValues]) {
+        if (webview != self.webview) [webview evaluateJavaScript:js completionHandler:nil];
+    }
 }
 
 - (void)handleWebviewDialog:(NSString *)jsonStr {
@@ -1150,7 +1256,8 @@ static id g_globalMonitor = nil;
     if ([modal boolValue] && self.window) {
         [self.window beginSheet:win completionHandler:^(NSModalResponse resp) {
             [self.windows removeObjectForKey:windowId];
-            [self.webviews removeObjectForKey:windowId];
+            [self dropPendingForWebview:self.webviews[windowId]];
+        [self.webviews removeObjectForKey:windowId];
             char json[256];
             snprintf(json, sizeof(json),
                 "{\"id\":\"0\",\"type\":\"event\",\"action\":\"window:closed\",\"data\":{\"windowId\":\"%s\"}}",
@@ -1421,6 +1528,7 @@ static unsigned short keyCodeForString(NSString *key) {
             [win close];
         }
         [self.windows removeObjectForKey:windowId];
+        [self dropPendingForWebview:self.webviews[windowId]];
         [self.webviews removeObjectForKey:windowId];
     }
 }
@@ -1771,15 +1879,8 @@ static unsigned short keyCodeForString(NSString *key) {
                 continue;
             }
         }
-        /* Inject response/event into webview */
-        if (self.webview && json) {
-            NSString *escaped = [json stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"];
-            escaped = [escaped stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
-            escaped = [escaped stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"];
-            escaped = [escaped stringByReplacingOccurrencesOfString:@"\r" withString:@"\\r"];
-            NSString *js = [NSString stringWithFormat:@"window.__butterReceive('%@')", escaped];
-            [self.webview evaluateJavaScript:js completionHandler:nil];
-        }
+        /* Inject response/event into the right webview(s) */
+        [self deliverJson:json];
         free(msg);
     }
 }
